@@ -23,13 +23,20 @@ Here are some basic examples to get you started:
 
 3. **Applying Density Filter during conversion:**:
    ```bash
-   python 3dgsconverterv2.py -i input_3dgs.ply -o output_cc.ply -f cc --density_filter
+   python 3dgsconverter.py -i input_3dgs.ply -o output_cc.ply -f cc --density_filter
 
 3. **Applying Density Filter and Removing floaters during conversion:**:
    ```bash
-   python 3dgsconverterv2.py -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove fliers
+   python 3dgsconverter.py -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove fliers
 
+For a full list of parameters and their descriptions, you can use the `-h` or `--help` argument:
+```bash
+python 3dgsconverter.py -h
+```
 
 ## Debug Information
 
 As of the current version, the converter outputs a significant amount of debug information to the console during execution. This is intended for troubleshooting and to provide insights into the conversion process. Future versions may include a switch to toggle these debug messages on or off.
+
+## Contribute
+Feel free to open issues or PRs if you have suggestions or improvements for this tool!
