@@ -4,7 +4,7 @@ import multiprocessing
 import sys
 import signal
 from plyfile import PlyData, PlyElement
-from tqdm import tqdm
+#from tqdm import tqdm
 from collections import deque
 from multiprocessing import Pool, cpu_count
 from sklearn.neighbors import NearestNeighbors
