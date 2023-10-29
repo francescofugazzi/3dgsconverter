@@ -574,6 +574,12 @@ def main():
     parser.add_argument("--remove_flyers", action="store_true", help="Remove flyer points that are distant from the main cloud.")
     
     args = parser.parse_args()
+    
+    if os.path.exists(args.output):
+        user_response = input(f"File {args.output} already exists. Do you want to overwrite it? (yes/no): ").lower()
+        if user_response != 'yes':
+            print("Operation aborted by the user.")
+            return
 
     # Detect the format of the input file
     source_format = Utility.text_based_detect_format(args.input)
