@@ -13,23 +13,32 @@ A tool for converting 3D Gaussian Splatting `.ply` files into a format suitable 
 
 Here are some basic examples to get you started:
 
-1. **Conversion from 3DGS to Cloud Compare format with RGB addition**:
+**1. Conversion from 3DGS to Cloud Compare format with RGB addition**:
+
    ```bash
    python 3dgsconverter.py -i input_3dgs.ply -o output_cc.ply -f cc --rgb
+   ```
 
-2. **Conversion from Cloud Compare format back to 3DGS:**:
+**2. Conversion from Cloud Compare format back to 3DGS:**:
+
    ```bash
    python 3dgsconverter.py -i input_cc.ply -o output_3dgs.ply -f 3dgs
+   ```
 
-3. **Applying Density Filter during conversion:**:
+**3. Applying Density Filter during conversion:**:
+
    ```bash
    python 3dgsconverter.py -i input_3dgs.ply -o output_cc.ply -f cc --density_filter
+   ```
 
-3. **Applying Density Filter and Removing floaters during conversion:**:
+**4. Applying Density Filter and Removing floaters during conversion:**:
+
    ```bash
    python 3dgsconverter.py -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove fliers
+   ```
 
 For a full list of parameters and their descriptions, you can use the `-h` or `--help` argument:
+
 ```bash
 python 3dgsconverter.py -h
 ```
@@ -39,4 +48,5 @@ python 3dgsconverter.py -h
 As of the current version, the converter outputs a significant amount of debug information to the console during execution. This is intended for troubleshooting and to provide insights into the conversion process. Future versions may include a switch to toggle these debug messages on or off.
 
 ## Contribute
+
 Feel free to open issues or PRs if you have suggestions or improvements for this tool!
