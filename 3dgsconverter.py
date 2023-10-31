@@ -576,6 +576,8 @@ def main():
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug prints.")
 
     # Other flags
+    parser.add_argument("--bbox", nargs=6, type=float, metavar=('minX', 'minY', 'minZ', 'maxX', 'maxY', 'maxZ'), help="Specify the 3D bounding box to crop the point cloud.")
+
     parser.add_argument("--rgb", action="store_true", help="Add RGB values to the output file based on f_dc values (only applicable when converting to Cloud Compare format).")
     parser.add_argument("--density_filter", action="store_true", help="Filter the points to keep only regions with higher point density.")
     parser.add_argument("--remove_flyers", action="store_true", help="Remove flyer points that are distant from the main cloud.")
@@ -619,6 +621,43 @@ def main():
 
     # Print the number of vertices in the header
     print(f"Number of vertices in the header: {len(data['vertex'].data)}")
+
+
+
+    if args.bbox:
+        # Extract the 6 parameters for the bounding box
+        min_x, min_y, min_z, max_x, max_y, max_z = args.bbox
+
+        # Perform cropping based on the bounding box
+        if source_format == "3dgs":
+            if args.target_format == "3dgs":
+                print("Error: --bbox cropping is not supported for 3dgs to 3dgs conversion.")
+                return
+            else:
+                # Crop the data based on the bounding box
+                data['vertex'].data = data['vertex'].data[
+                    (data['vertex'].data['x'] >= min_x) &
+                    (data['vertex'].data['x'] <= max_x) &
+                    (data['vertex'].data['y'] >= min_y) &
+                    (data['vertex'].data['y'] <= max_y) &
+                    (data['vertex'].data['z'] >= min_z) &
+                    (data['vertex'].data['z'] <= max_z)
+                ]
+        else:
+            # For CC format, cropping is supported for both target formats
+            data['vertex'].data = data['vertex'].data[
+                (data['vertex'].data['x'] >= min_x) &
+                (data['vertex'].data['x'] <= max_x) &
+                (data['vertex'].data['y'] >= min_y) &
+                (data['vertex'].data['y'] <= max_y) &
+                (data['vertex'].data['z'] >= min_z) &
+                (data['vertex'].data['z'] <= max_z)
+            ]
+
+        # Print the number of vertices after cropping
+        print(f"Number of vertices after cropping: {len(data['vertex'].data)}")
+
+
     
     try:
         with Pool(initializer=init_worker) as pool:
@@ -643,3 +682,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
