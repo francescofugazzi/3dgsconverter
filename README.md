@@ -45,7 +45,7 @@ python 3dgsconverter.py -h
 
 ## Debug Information
 
-As of the current version, the converter outputs a significant amount of debug information to the console during execution. This is intended for troubleshooting and to provide insights into the conversion process. Future versions may include a switch to toggle these debug messages on or off.
+For detailed insights pass the `--debug` flag (or `-d` for short) when executing the script.
 
 ## Contribute
 

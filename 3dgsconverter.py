@@ -550,7 +550,7 @@ def convert(data, source_format, target_format, **kwargs):
         else:
             return converter.to_3dgs()
     elif source_format == "cc" and target_format == "cc":
-        ddebug_print("[DEBUG] Applying operations on CC data...")
+        debug_print("[DEBUG] Applying operations on CC data...")
         converted_data = converter.to_cc()
         if isinstance(converted_data, np.ndarray):
             return converted_data
