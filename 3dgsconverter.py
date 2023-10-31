@@ -3,16 +3,19 @@ import numpy as np
 import multiprocessing
 import sys
 import signal
+import os
 from plyfile import PlyData, PlyElement
 #from tqdm import tqdm
 from collections import deque
 from multiprocessing import Pool, cpu_count
 from sklearn.neighbors import NearestNeighbors
 
+DEBUG = False
+
 class Utility:
     @staticmethod
     def text_based_detect_format(file_path):
-        print("[DEBUG] Executing 'text_based_detect_format' function...")
+        debug_print("[DEBUG] Executing 'text_based_detect_format' function...")
 
         """Detect if the given file is in '3dgs' or 'cc' format."""
         with open(file_path, 'rb') as file:
@@ -21,17 +24,17 @@ class Utility:
         header = header_bytes.decode('utf-8', errors='ignore')
 
         if "property float f_dc_0" in header:
-            print("[DEBUG] Detected format: 3dgs")
+            debug_print("[DEBUG] Detected format: 3dgs")
             return "3dgs"
         elif "property float scal_f_dc_0" in header or "property float scalar_scal_f_dc_0" in header or "property float scalar_f_dc_0" in header:
-            print("[DEBUG] Detected format: cc")
+            debug_print("[DEBUG] Detected format: cc")
             return "cc"
         else:
             return None
 
     @staticmethod
     def copy_data_with_prefix_check(source, target, possible_prefixes):
-        print("[DEBUG] Executing 'copy_data_with_prefix_check' function...")
+        debug_print("[DEBUG] Executing 'copy_data_with_prefix_check' function...")
 
         """
         Given two structured numpy arrays (source and target), copy the data from source to target.
@@ -55,7 +58,7 @@ class Utility:
                     else:
                         prefixed_name = prefix + name
                         if prefixed_name in target.dtype.names:
-                            print(f"[DEBUG] Copying data from '{name}' to '{prefixed_name}'")
+                            debug_print(f"[DEBUG] Copying data from '{name}' to '{prefixed_name}'")
                             target[prefixed_name] = source[name]
                             copied = True
                             break
@@ -64,7 +67,7 @@ class Utility:
 
     @staticmethod
     def compute_rgb_from_vertex(vertices):
-        print("[DEBUG] Executing 'compute_rgb_from_vertex' function...")
+        debug_print("[DEBUG] Executing 'compute_rgb_from_vertex' function...")
         
         # Depending on the available field names, choose the appropriate ones
         if 'f_dc_0' in vertices.dtype.names:
@@ -75,12 +78,12 @@ class Utility:
         colors = (f_dc + 1) * 127.5
         colors = np.clip(colors, 0, 255).astype(np.uint8)
         
-        print("[DEBUG] RGB colors computed.")
+        debug_print("[DEBUG] RGB colors computed.")
         return colors
 
     @staticmethod
     def parallel_voxel_counting(vertices, voxel_size=1.0):
-        print("[DEBUG] Executing 'parallel_voxel_counting' function...")
+        debug_print("[DEBUG] Executing 'parallel_voxel_counting' function...")
         
         """Counts the number of points in each voxel in a parallelized manner."""
         num_processes = cpu_count()
@@ -100,12 +103,12 @@ class Utility:
                 else:
                     total_voxel_counts[k] = v
 
-        print(f"[DEBUG] Voxel counting completed with {len(total_voxel_counts)} unique voxels found.")
+        debug_print(f"[DEBUG] Voxel counting completed with {len(total_voxel_counts)} unique voxels found.")
         return total_voxel_counts
     
     @staticmethod
     def count_voxels_chunk(vertices_chunk, voxel_size):
-        print("[DEBUG] Executing 'count_voxels_chunk' function for a chunk...")
+        debug_print("[DEBUG] Executing 'count_voxels_chunk' function for a chunk...")
         
         """Count the number of points in each voxel for a chunk of vertices."""
         voxel_counts = {}
@@ -116,12 +119,12 @@ class Utility:
             else:
                 voxel_counts[voxel_coords] = 1
         
-        print(f"[DEBUG] Chunk processed with {len(voxel_counts)} voxels counted.")
+        debug_print(f"[DEBUG] Chunk processed with {len(voxel_counts)} voxels counted.")
         return voxel_counts
     
     @staticmethod
     def get_neighbors(voxel_coords):
-        print(f"[DEBUG] Getting neighbors for voxel: {voxel_coords}...")
+        debug_print(f"[DEBUG] Getting neighbors for voxel: {voxel_coords}...")
         
         """Get the face-touching neighbors of the given voxel coordinates."""
         x, y, z = voxel_coords
@@ -134,7 +137,7 @@ class Utility:
 
     @staticmethod
     def knn_worker(args):
-        print(f"[DEBUG] Executing 'knn_worker' function for vertex: {args[0]}...")
+        debug_print(f"[DEBUG] Executing 'knn_worker' function for vertex: {args[0]}...")
         
         """Utility function for parallel KNN computation."""
         coords, tree, k = args
@@ -142,7 +145,7 @@ class Utility:
         distances, _ = tree.kneighbors(coords)
         avg_distance = np.mean(distances[:, 1:])
         
-        print(f"[DEBUG] Average distance computed for vertex: {args[0]} is {avg_distance}.")
+        debug_print(f"[DEBUG] Average distance computed for vertex: {args[0]} is {avg_distance}.")
         return avg_distance
     
     @staticmethod
@@ -155,12 +158,12 @@ class BaseConverter:
 
     def extract_vertex_data(vertices, has_scal=True, has_rgb=False):
         """Extract and convert vertex data from a structured numpy array of vertices."""
-        print("[DEBUG] Executing 'extract_vertex_data' function...")
+        debug_print("[DEBUG] Executing 'extract_vertex_data' function...")
         converted_data = []
         
         # Determine the prefix to be used based on whether "scal_" should be included
         prefix = 'scal_' if has_scal else ''
-        print(f"[DEBUG] Prefix determined as: {prefix}")
+        debug_print(f"[DEBUG] Prefix determined as: {prefix}")
         
         # Iterate over each vertex and extract the necessary attributes
         for vertex in vertices:
@@ -180,11 +183,11 @@ class BaseConverter:
             
             converted_data.append(entry)
         
-        print("[DEBUG] 'extract_vertex_data' function completed.")
+        debug_print("[DEBUG] 'extract_vertex_data' function completed.")
         return converted_data
 
     def apply_density_filter(self, voxel_size=1.0, threshold_percentage=0.32):
-        print("[DEBUG] Executing 'apply_density_filter' function...")
+        debug_print("[DEBUG] Executing 'apply_density_filter' function...")
         vertices = self.data['vertex'].data
 
         # Convert threshold_percentage into a ratio
@@ -221,16 +224,16 @@ class BaseConverter:
         converted_data.elements = (new_vertex_element,) + converted_data.elements[1:]
         self.data = converted_data  # Update the internal data with the filtered data
         
-        print(f"[DEBUG] After density filter, retained {len(filtered_vertices)} out of {len(vertices)} vertices.")
+        print(f"After density filter, retained {len(filtered_vertices)} out of {len(vertices)} vertices.")
 
     def remove_flyers(self, k=25, threshold_factor=10.5, chunk_size=50000):
-        print("[DEBUG] Executing 'remove_flyers' function...")
+        debug_print("[DEBUG] Executing 'remove_flyers' function...")
 
         # Extract vertex data from the current object's data
         vertices = self.data['vertex'].data
         
         # Display the number of input vertices
-        print(f"[DEBUG] Number of input vertices: {len(vertices)}")
+        debug_print(f"[DEBUG] Number of input vertices: {len(vertices)}")
 
         # Number of chunks
         num_chunks = len(vertices) // chunk_size + (len(vertices) % chunk_size > 0)
@@ -264,14 +267,14 @@ class BaseConverter:
         # Update the plydata elements and the internal self.data
         self.data.elements = (new_vertex_element,) + self.data.elements[1:]
         
-        print(f"[DEBUG] After removing flyers, retained {len(vertices[combined_mask])} out of {len(vertices)} vertices.")
+        print(f"After removing flyers, retained {len(vertices[combined_mask])} out of {len(vertices)} vertices.")
 
 
     def define_dtype(self, has_scal, has_rgb=False):
-        print("[DEBUG] Executing 'define_dtype' function...")
+        debug_print("[DEBUG] Executing 'define_dtype' function...")
         
         prefix = 'scalar_scal_' if has_scal else ''
-        print(f"[DEBUG] Prefix determined as: {prefix}")
+        debug_print(f"[DEBUG] Prefix determined as: {prefix}")
         
         dtype = [
             ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
@@ -282,13 +285,13 @@ class BaseConverter:
             (f'{prefix}scale_0', 'f4'), (f'{prefix}scale_1', 'f4'), (f'{prefix}scale_2', 'f4'),
             (f'{prefix}rot_0', 'f4'), (f'{prefix}rot_1', 'f4'), (f'{prefix}rot_2', 'f4'), (f'{prefix}rot_3', 'f4')
         ]
-        print("[DEBUG] Main dtype constructed.")
+        debug_print("[DEBUG] Main dtype constructed.")
         
         if has_rgb:
             dtype.extend([('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
-            print("[DEBUG] RGB fields added to dtype.")
+            debug_print("[DEBUG] RGB fields added to dtype.")
         
-        print("[DEBUG] 'define_dtype' function completed.")
+        debug_print("[DEBUG] 'define_dtype' function completed.")
         return dtype, prefix
     
     def has_rgb(self):
@@ -296,25 +299,25 @@ class BaseConverter:
 
 class Format3dgs(BaseConverter):
     def to_cc(self, apply_density_filter=False, remove_flyers=False, process_rgb=True):
-        print("[DEBUG] Starting conversion from 3DGS to CC...")
+        debug_print("[DEBUG] Starting conversion from 3DGS to CC...")
 
         # Apply density filter if required
         if apply_density_filter:
             self.apply_density_filter()
-            print("[DEBUG] Density filter applied.")
+            debug_print("[DEBUG] Density filter applied.")
 
         # Remove flyers if required
         if remove_flyers:
             self.remove_flyers()
-            print("[DEBUG] Flyers removed.")
+            debug_print("[DEBUG] Flyers removed.")
 
         # Load vertices from the provided data
         vertices = self.data['vertex'].data
-        print(f"[DEBUG] Loaded {len(vertices)} vertices.")
+        debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
 
         # Check if RGB processing is required
         if process_rgb and self.has_rgb():
-            print("[DEBUG] RGB processing is enabled.")
+            debug_print("[DEBUG] RGB processing is enabled.")
             
             # Compute RGB values for the vertices
             rgb_values = Utility.compute_rgb_from_vertex(vertices)
@@ -333,9 +336,9 @@ class Format3dgs(BaseConverter):
             converted_data['green'] = rgb_values[:, 1]
             converted_data['blue'] = rgb_values[:, 2]
             
-            print("[DEBUG] RGB processing completed.")
+            print("RGB processing completed.")
         else:
-            print("[DEBUG] RGB processing is skipped.")
+            debug_print("[DEBUG] RGB processing is skipped.")
             
             # Define a new data type for the vertices without RGB
             new_dtype, prefix = self.define_dtype(has_scal=True, has_rgb=process_rgb)
@@ -347,25 +350,25 @@ class Format3dgs(BaseConverter):
             Utility.copy_data_with_prefix_check(vertices, converted_data, [prefix])
 
         # For now, we'll just return the converted_data for the sake of this integration
-        print("[DEBUG] Conversion from 3DGS to CC completed.")
+        debug_print("[DEBUG] Conversion from 3DGS to CC completed.")
         return converted_data
 
     def to_3dgs(self, apply_density_filter=False, remove_flyers=False):
-        print("[DEBUG] Starting conversion from 3DGS to 3DGS...")
+        debug_print("[DEBUG] Starting conversion from 3DGS to 3DGS...")
 
         # Apply density filter if required
         if apply_density_filter:
             self.apply_density_filter()
-            print("[DEBUG] Density filter applied.")
+            debug_print("[DEBUG] Density filter applied.")
 
         # Remove flyers if required
         if remove_flyers:
             self.remove_flyers()
-            print("[DEBUG] Flyers removed.")
+            debug_print("[DEBUG] Flyers removed.")
 
         # Load vertices from the updated data after all filters
         vertices = self.data['vertex'].data
-        print(f"[DEBUG] Loaded {len(vertices)} vertices.")
+        debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
 
         # Create a new structured numpy array for 3DGS format
         dtype_3dgs = self.define_dtype(has_scal=False, has_rgb=False)  # Define 3DGS dtype without any prefix
@@ -374,16 +377,17 @@ class Format3dgs(BaseConverter):
         # Use the helper function to copy the data from vertices to converted_data
         Utility.copy_data_with_prefix_check(vertices, converted_data, ["", "scal_", "scalar_", "scalar_scal_"])
 
-        print("[DEBUG] Data copying completed.")
-        print("\\n[DEBUG] Sample of converted data (first 10 rows):")
-        for i in range(10):
-            print(converted_data[i])
+        debug_print("[DEBUG] Data copying completed.")
+        debug_print("\\n[DEBUG] Sample of converted data (first 5 rows):")
+        if DEBUG:
+            for i in range(5):
+                debug_print(converted_data[i])
 
-        print("[DEBUG] Conversion from 3DGS to 3DGS completed.")
+        debug_print("[DEBUG] Conversion from 3DGS to 3DGS completed.")
         return converted_data
     
     def ignore_rgb(self):
-        print("[DEBUG] Checking RGB for 3DGS data...")
+        debug_print("[DEBUG] Checking RGB for 3DGS data...")
 
         # Initialize converted_data to the original vertex data
         converted_data = self.data['vertex'].data
@@ -400,31 +404,31 @@ class Format3dgs(BaseConverter):
             Utility.copy_data_with_prefix_check(self.data['vertex'].data, converted_data_without_rgb, exclude=['red', 'green', 'blue'])
             
             converted_data = converted_data_without_rgb  # Update the converted data
-            print("[DEBUG] RGB removed from data.")
+            debug_print("[DEBUG] RGB removed from data.")
         else:
-            print("[DEBUG] Data does not have RGB or RGB removal is skipped.")
+            debug_print("[DEBUG] Data does not have RGB or RGB removal is skipped.")
         
         # For now, we'll just return the converted_data for the sake of this integration
-        print("[DEBUG] RGB check for 3DGS data completed.")
+        debug_print("[DEBUG] RGB check for 3DGS data completed.")
         return converted_data
 
 class FormatCC(BaseConverter):
     def to_3dgs(self, apply_density_filter=False, remove_flyers=False):
-        print("[DEBUG] Starting conversion from CC to 3DGS...")
+        debug_print("[DEBUG] Starting conversion from CC to 3DGS...")
 
         # Apply density filter if required
         if apply_density_filter:
             self.data = self.apply_density_filter()
-            print("[DEBUG] Density filter applied.")
+            debug_print("[DEBUG] Density filter applied.")
 
         # Remove flyers if required
         if remove_flyers:
             self.data = self.remove_flyers()
-            print("[DEBUG] Flyers removed.")
+            debug_print("[DEBUG] Flyers removed.")
 
         # Load vertices from the updated data after all filters
         vertices = self.data['vertex'].data
-        print(f"[DEBUG] Loaded {len(vertices)} vertices.")
+        debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
 
         # Create a new structured numpy array for 3DGS format
         dtype_3dgs = self.define_dtype(has_scal=False, has_rgb=False)  # Define 3DGS dtype without any prefix
@@ -433,43 +437,44 @@ class FormatCC(BaseConverter):
         # Use the helper function to copy the data from vertices to converted_data
         Utility.copy_data_with_prefix_check(vertices, converted_data, ["", "scal_", "scalar_", "scalar_scal_"])
 
-        print("[DEBUG] Data copying completed.")
-        print("\\n[DEBUG] Sample of converted data (first 10 rows):")
-        for i in range(10):
-            print(converted_data[i])
+        debug_print("[DEBUG] Data copying completed.")
+        debug_print("\\n[DEBUG] Sample of converted data (first 5 rows):")
+        if DEBUG:
+            for i in range(5):
+                debug_print(converted_data[i])
 
-        print("[DEBUG] Conversion from CC to 3DGS completed.")
+        debug_print("[DEBUG] Conversion from CC to 3DGS completed.")
         return converted_data
 
 
     def to_cc(self, apply_density_filter=False, remove_flyers=False, process_rgb=False):
-        print("[DEBUG] Processing CC data...")
+        debug_print("[DEBUG] Processing CC data...")
 
         # Apply density filter if required
         if apply_density_filter:
             self.apply_density_filter()
-            print("[DEBUG] Density filter applied.")
+            debug_print("[DEBUG] Density filter applied.")
 
         # Remove flyers if required
         if remove_flyers:
             self.remove_flyers()
-            print("[DEBUG] Flyers removed.")
+            debug_print("[DEBUG] Flyers removed.")
 
         # Check if RGB processing is required
         if process_rgb and not self.has_rgb():
             self.add_rgb()
-            print("[DEBUG] RGB added to data.")
+            debug_print("[DEBUG] RGB added to data.")
         else:
-            print("[DEBUG] RGB processing is skipped or data already has RGB.")
+            debug_print("[DEBUG] RGB processing is skipped or data already has RGB.")
         
         converted_data = self.data
         
         # For now, we'll just return the converted_data for the sake of this integration
-        print("[DEBUG] CC data processing completed.")
+        debug_print("[DEBUG] CC data processing completed.")
         return converted_data
 
     def add_or_ignore_rgb(self, process_rgb=True):
-        print("[DEBUG] Checking RGB for CC data...")
+        debug_print("[DEBUG] Checking RGB for CC data...")
 
         # If RGB processing is required and if RGB is not present
         if process_rgb and not self.has_rgb():
@@ -491,17 +496,17 @@ class FormatCC(BaseConverter):
             converted_data['blue'] = rgb_values[2]
             
             self.data = converted_data  # Update the instance's data with the new data
-            print("[DEBUG] RGB added to data.")
+            debug_print("[DEBUG] RGB added to data.")
         else:
-            print("[DEBUG] RGB processing is skipped or data already has RGB.")
+            debug_print("[DEBUG] RGB processing is skipped or data already has RGB.")
             converted_data = self.data  # If RGB is not added or skipped, the converted_data is just the original data.
 
         # Return the converted_data
-        print("[DEBUG] RGB check for CC data completed.")
+        debug_print("[DEBUG] RGB check for CC data completed.")
         return converted_data
 
 def convert(data, source_format, target_format, **kwargs):
-    print(f"[DEBUG] Starting conversion from {source_format} to {target_format}...")
+    debug_print(f"[DEBUG] Starting conversion from {source_format} to {target_format}...")
     
     if source_format == "3dgs":
         converter = Format3dgs(data)
@@ -512,40 +517,40 @@ def convert(data, source_format, target_format, **kwargs):
 
     # Apply optional operations
     if kwargs.get("density_filter"):
-        print("[DEBUG] Applying density filter...")
+        print("Applying density filter...")
         converter.apply_density_filter()
     if kwargs.get("remove_flyers"):
-        print("[DEBUG] Removing flyers...")
+        print("Removing flyers...")
         converter.remove_flyers()
 
     # RGB processing
     if source_format == "3dgs":
-        print("[DEBUG] Ignoring RGB for 3DGS data...")
+        debug_print("[DEBUG] Ignoring RGB for 3DGS data...")
         converter.ignore_rgb()
     elif source_format == "cc":
         if kwargs.get("process_rgb", False) and converter.has_rgb():
             print("Error: Source CC file already contains RGB data. Conversion stopped.")
             return None
-        print("[DEBUG] Adding or ignoring RGB for CC data...")
+        debug_print("[DEBUG] Adding or ignoring RGB for CC data...")
         converter.add_or_ignore_rgb(process_rgb=kwargs.get("process_rgb", False))
 
     # Conversion operations
     process_rgb_flag = kwargs.get("process_rgb", False)
     if source_format == "3dgs" and target_format == "cc":
-        print("[DEBUG] Converting 3DGS to CC...")
+        debug_print("[DEBUG] Converting 3DGS to CC...")
         return converter.to_cc(process_rgb=process_rgb_flag)
     elif source_format == "cc" and target_format == "3dgs":
-        print("[DEBUG] Converting CC to 3DGS...")
+        debug_print("[DEBUG] Converting CC to 3DGS...")
         return converter.to_3dgs()
     elif source_format == "3dgs" and target_format == "3dgs":
-        print("[DEBUG] Applying operations on 3DGS data...")
+        debug_print("[DEBUG] Applying operations on 3DGS data...")
         if not any(kwargs.values()):  # If no flags are provided
             print("[INFO] No flags provided. The conversion will not happen as the output would be identical to the input.")
             return data['vertex'].data
         else:
             return converter.to_3dgs()
     elif source_format == "cc" and target_format == "cc":
-        print("[DEBUG] Applying operations on CC data...")
+        ddebug_print("[DEBUG] Applying operations on CC data...")
         converted_data = converter.to_cc()
         if isinstance(converted_data, np.ndarray):
             return converted_data
@@ -554,11 +559,12 @@ def convert(data, source_format, target_format, **kwargs):
     else:
         raise ValueError("Unsupported conversion")
 
-
-
-
 def init_worker():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    
+def debug_print(message):
+    if DEBUG:
+        print(message)
 
 def main():
     parser = argparse.ArgumentParser(description="Convert between standard 3D Gaussian Splat and Cloud Compare formats.")
@@ -567,7 +573,8 @@ def main():
     parser.add_argument("--input", "-i", required=True, help="Path to the source point cloud file.")
     parser.add_argument("--output", "-o", required=True, help="Path to save the converted point cloud file.")
     parser.add_argument("--target_format", "-f", choices=["3dgs", "cc"], required=True, help="Target point cloud format.")
-    
+    parser.add_argument("--debug", "-d", action="store_true", help="Enable debug prints.")
+
     # Other flags
     parser.add_argument("--rgb", action="store_true", help="Add RGB values to the output file based on f_dc values (only applicable when converting to Cloud Compare format).")
     parser.add_argument("--density_filter", action="store_true", help="Filter the points to keep only regions with higher point density.")
@@ -575,9 +582,12 @@ def main():
     
     args = parser.parse_args()
     
+    global DEBUG
+    DEBUG = args.debug
+
     if os.path.exists(args.output):
-        user_response = input(f"File {args.output} already exists. Do you want to overwrite it? (yes/no): ").lower()
-        if user_response != 'yes':
+        user_response = input(f"File {args.output} already exists. Do you want to overwrite it? (y/N): ").lower()
+        if user_response != 'y':
             print("Operation aborted by the user.")
             return
 
