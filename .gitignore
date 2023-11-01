@@ -1,1 +1,4 @@
 *.ply
+build
+__pycache__
+*.egg-info
