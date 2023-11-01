@@ -296,11 +296,30 @@ class BaseConverter:
     
     def has_rgb(self):
         return 'red' in self.data['vertex'].data.dtype.names and 'green' in self.data['vertex'].data.dtype.names and 'blue' in self.data['vertex'].data.dtype.names
+    
+    def crop_by_bbox(self, min_x, min_y, min_z, max_x, max_y, max_z):
+        # Perform cropping based on the bounding box
+        self.data['vertex'].data = self.data['vertex'].data[
+            (self.data['vertex'].data['x'] >= min_x) &
+            (self.data['vertex'].data['x'] <= max_x) &
+            (self.data['vertex'].data['y'] >= min_y) &
+            (self.data['vertex'].data['y'] <= max_y) &
+            (self.data['vertex'].data['z'] >= min_z) &
+            (self.data['vertex'].data['z'] <= max_z)
+        ]
+        # Print the number of vertices after cropping
+        print(f"Number of vertices after cropping: {len(self.data['vertex'].data)}")
 
 class Format3dgs(BaseConverter):
-    def to_cc(self, apply_density_filter=False, remove_flyers=False, process_rgb=True):
+    def to_cc(self, bbox=None, apply_density_filter=False, remove_flyers=False, process_rgb=True):
         debug_print("[DEBUG] Starting conversion from 3DGS to CC...")
 
+        # Crop the data based on the bounding box if specified
+        if bbox:
+            min_x, min_y, min_z, max_x, max_y, max_z = bbox
+            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+            debug_print("[DEBUG] Bounding box cropped.")
+        
         # Apply density filter if required
         if apply_density_filter:
             self.apply_density_filter()
@@ -316,36 +335,41 @@ class Format3dgs(BaseConverter):
         debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
 
         # Check if RGB processing is required
-        if process_rgb and self.has_rgb():
+        if process_rgb:
             debug_print("[DEBUG] RGB processing is enabled.")
-            
+
             # Compute RGB values for the vertices
             rgb_values = Utility.compute_rgb_from_vertex(vertices)
-            
-            # Define a new data type for the vertices that includes RGB
-            new_dtype, prefix = self.define_dtype(has_scal=True, has_rgb=process_rgb)
-            
-            # Create a new numpy array with the new data type
-            converted_data = np.zeros(vertices.shape, dtype=new_dtype)
-            
-            # Copy the vertex data to the new numpy array
-            Utility.copy_data_with_prefix_check(vertices, converted_data, [prefix])
-            
-            # Add the RGB values to the new numpy array
-            converted_data['red'] = rgb_values[:, 0]
-            converted_data['green'] = rgb_values[:, 1]
-            converted_data['blue'] = rgb_values[:, 2]
-            
-            print("RGB processing completed.")
-        else:
+
+            if rgb_values is not None:
+                # Define a new data type for the vertices that includes RGB
+                new_dtype, prefix = self.define_dtype(has_scal=True, has_rgb=True)
+
+                # Create a new numpy array with the new data type
+                converted_data = np.zeros(vertices.shape, dtype=new_dtype)
+
+                # Copy the vertex data to the new numpy array
+                Utility.copy_data_with_prefix_check(vertices, converted_data, [prefix])
+
+                # Add the RGB values to the new numpy array
+                converted_data['red'] = rgb_values[:, 0]
+                converted_data['green'] = rgb_values[:, 1]
+                converted_data['blue'] = rgb_values[:, 2]
+
+                debug_print("RGB processing completed.")
+            else:
+                debug_print("[DEBUG] RGB computation failed. Skipping RGB processing.")
+                process_rgb = False
+
+        if not process_rgb:
             debug_print("[DEBUG] RGB processing is skipped.")
-            
+
             # Define a new data type for the vertices without RGB
-            new_dtype, prefix = self.define_dtype(has_scal=True, has_rgb=process_rgb)
-            
+            new_dtype, prefix = self.define_dtype(has_scal=True, has_rgb=False)
+
             # Create a new numpy array with the new data type
             converted_data = np.zeros(vertices.shape, dtype=new_dtype)
-            
+
             # Copy the vertex data to the new numpy array
             Utility.copy_data_with_prefix_check(vertices, converted_data, [prefix])
 
@@ -353,9 +377,15 @@ class Format3dgs(BaseConverter):
         debug_print("[DEBUG] Conversion from 3DGS to CC completed.")
         return converted_data
 
-    def to_3dgs(self, apply_density_filter=False, remove_flyers=False):
+    def to_3dgs(self, bbox=None, apply_density_filter=False, remove_flyers=False):
         debug_print("[DEBUG] Starting conversion from 3DGS to 3DGS...")
 
+        # Crop the data based on the bounding box if specified
+        if bbox:
+            min_x, min_y, min_z, max_x, max_y, max_z = bbox
+            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+            debug_print("[DEBUG] Bounding box cropped.")
+        
         # Apply density filter if required
         if apply_density_filter:
             self.apply_density_filter()
@@ -413,9 +443,15 @@ class Format3dgs(BaseConverter):
         return converted_data
 
 class FormatCC(BaseConverter):
-    def to_3dgs(self, apply_density_filter=False, remove_flyers=False):
+    def to_3dgs(self, bbox=None, apply_density_filter=False, remove_flyers=False):
         debug_print("[DEBUG] Starting conversion from CC to 3DGS...")
 
+        # Crop the data based on the bounding box if specified
+        if bbox:
+            min_x, min_y, min_z, max_x, max_y, max_z = bbox
+            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+            debug_print("[DEBUG] Bounding box cropped.")
+        
         # Apply density filter if required
         if apply_density_filter:
             self.data = self.apply_density_filter()
@@ -447,9 +483,15 @@ class FormatCC(BaseConverter):
         return converted_data
 
 
-    def to_cc(self, apply_density_filter=False, remove_flyers=False, process_rgb=False):
+    def to_cc(self, bbox=None, apply_density_filter=False, remove_flyers=False, process_rgb=False):
         debug_print("[DEBUG] Processing CC data...")
 
+        # Crop the data based on the bounding box if specified
+        if bbox:
+            min_x, min_y, min_z, max_x, max_y, max_z = bbox
+            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
+            debug_print("[DEBUG] Bounding box cropped.")
+        
         # Apply density filter if required
         if apply_density_filter:
             self.apply_density_filter()
@@ -491,9 +533,10 @@ class FormatCC(BaseConverter):
             Utility.copy_data_with_prefix_check(self.data, converted_data)
             
             # Add the RGB values to the new numpy array
-            converted_data['red'] = rgb_values[0]
-            converted_data['green'] = rgb_values[1]
-            converted_data['blue'] = rgb_values[2]
+            converted_data['red'] = rgb_values[:, 0]
+            converted_data['green'] = rgb_values[:, 1]
+            converted_data['blue'] = rgb_values[:, 2]
+
             
             self.data = converted_data  # Update the instance's data with the new data
             debug_print("[DEBUG] RGB added to data.")
@@ -516,6 +559,10 @@ def convert(data, source_format, target_format, **kwargs):
         raise ValueError("Unsupported source format")
 
     # Apply optional operations
+    if kwargs.get("bbox"):
+        min_x, min_y, min_z, max_x, max_y, max_z = kwargs.get("bbox")
+        print("Cropping by bounding box...")
+        converter.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
     if kwargs.get("density_filter"):
         print("Applying density filter...")
         converter.apply_density_filter()
@@ -524,15 +571,22 @@ def convert(data, source_format, target_format, **kwargs):
         converter.remove_flyers()
 
     # RGB processing
-    if source_format == "3dgs":
-        debug_print("[DEBUG] Ignoring RGB for 3DGS data...")
-        converter.ignore_rgb()
+    if source_format == "3dgs" and target_format == "cc":
+        if kwargs.get("process_rgb", False):
+            debug_print("[DEBUG] Computing RGB for 3DGS data...")
+            # No need to explicitly call a function here, as the RGB computation is part of the to_cc() method.
+        else:
+            debug_print("[DEBUG] Ignoring RGB for 3DGS data...")
+            converter.ignore_rgb()
     elif source_format == "cc":
         if kwargs.get("process_rgb", False) and converter.has_rgb():
             print("Error: Source CC file already contains RGB data. Conversion stopped.")
             return None
         debug_print("[DEBUG] Adding or ignoring RGB for CC data...")
         converter.add_or_ignore_rgb(process_rgb=kwargs.get("process_rgb", False))
+    elif source_format == "3dgs" and target_format == "3dgs":
+        debug_print("[DEBUG] Ignoring RGB for 3DGS to 3DGS conversion...")
+        converter.ignore_rgb()
 
     # Conversion operations
     process_rgb_flag = kwargs.get("process_rgb", False)
@@ -622,47 +676,13 @@ def main():
     # Print the number of vertices in the header
     print(f"Number of vertices in the header: {len(data['vertex'].data)}")
 
-
-
-    if args.bbox:
-        # Extract the 6 parameters for the bounding box
-        min_x, min_y, min_z, max_x, max_y, max_z = args.bbox
-
-        # Perform cropping based on the bounding box
-        if source_format == "3dgs":
-            if args.target_format == "3dgs":
-                print("Error: --bbox cropping is not supported for 3dgs to 3dgs conversion.")
-                return
-            else:
-                # Crop the data based on the bounding box
-                data['vertex'].data = data['vertex'].data[
-                    (data['vertex'].data['x'] >= min_x) &
-                    (data['vertex'].data['x'] <= max_x) &
-                    (data['vertex'].data['y'] >= min_y) &
-                    (data['vertex'].data['y'] <= max_y) &
-                    (data['vertex'].data['z'] >= min_z) &
-                    (data['vertex'].data['z'] <= max_z)
-                ]
-        else:
-            # For CC format, cropping is supported for both target formats
-            data['vertex'].data = data['vertex'].data[
-                (data['vertex'].data['x'] >= min_x) &
-                (data['vertex'].data['x'] <= max_x) &
-                (data['vertex'].data['y'] >= min_y) &
-                (data['vertex'].data['y'] <= max_y) &
-                (data['vertex'].data['z'] >= min_z) &
-                (data['vertex'].data['z'] <= max_z)
-            ]
-
-        # Print the number of vertices after cropping
-        print(f"Number of vertices after cropping: {len(data['vertex'].data)}")
-
-
-    
     try:
         with Pool(initializer=init_worker) as pool:
-            # Call the convert function
-            converted_data = convert(data, source_format, args.target_format, process_rgb=args.rgb, density_filter=args.density_filter, remove_flyers=args.remove_flyers, pool=pool)
+            # If the bbox argument is provided, extract its values
+            bbox_values = args.bbox if args.bbox else None
+            
+            # Call the convert function and pass the bbox values (if provided)
+            converted_data = convert(data, source_format, args.target_format, process_rgb=args.rgb, density_filter=args.density_filter, remove_flyers=args.remove_flyers, bbox=bbox_values, pool=pool)
     except KeyboardInterrupt:
         print("Caught KeyboardInterrupt, terminating workers")
         pool.terminate()
