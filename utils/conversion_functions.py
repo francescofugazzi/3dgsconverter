@@ -19,8 +19,10 @@ def convert(data, source_format, target_format, **kwargs):
         print("Cropping by bounding box...")
         converter.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
     if kwargs.get("density_filter"):
-        print("Applying density filter...")
-        converter.apply_density_filter()
+        # Unpack the density filter values
+        voxel_size, threshold_percentage = kwargs.get("density_filter")
+        print(f"Applying density filter with voxel size: {voxel_size} and threshold percentage: {threshold_percentage}...")
+        converter.apply_density_filter(voxel_size=voxel_size, threshold_percentage=threshold_percentage)
     if kwargs.get("remove_flyers"):
         print("Removing flyers...")
         converter.remove_flyers()
