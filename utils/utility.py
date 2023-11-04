@@ -53,8 +53,8 @@ class Utility:
                             target[prefixed_name] = source[name]
                             copied = True
                             break
-                if not copied:
-                    print(f"Warning: Field {name} not found in target.")
+                ##if not copied:
+                ##    print(f"Warning: Field {name} not found in target.")
 
     @staticmethod
     def compute_rgb_from_vertex(vertices):
