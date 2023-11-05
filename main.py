@@ -1,3 +1,11 @@
+"""
+3D Gaussian Splatting Converter
+Copyright (c) 2023 Francesco Fugazzi
+
+This software is released under the MIT License.
+For more information about the license, please see the LICENSE file.
+"""
+
 import argparse
 import os
 import sys
@@ -8,10 +16,13 @@ from plyfile import PlyData, PlyElement
 from multiprocessing import Pool
 from utils import config
 from utils.utility_functions import init_worker
-from utils.argument_actions import DensityFilterAction, RemoveFlyersAction
+from utils.argument_actions import DensityFilterAction, RemoveFlyersAction, AboutAction
 
+__version__ = '0.1'
 
 def main():
+    print(f"3D Gaussian Splatting Converter: {__version__}")
+    
     parser = argparse.ArgumentParser(description="Convert between standard 3D Gaussian Splat and Cloud Compare formats.")
     
     # Arguments for input and output
@@ -19,6 +30,7 @@ def main():
     parser.add_argument("--output", "-o", required=True, help="Path to save the converted point cloud file.")
     parser.add_argument("--target_format", "-f", choices=["3dgs", "cc"], required=True, help="Target point cloud format.")
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug prints.")
+    parser.add_argument('--about', action=AboutAction, help='Show copyright and license info')
 
     # Other flags
     parser.add_argument("--rgb", action="store_true", help="Add RGB values to the output file based on f_dc values (only applicable when converting to Cloud Compare format).")

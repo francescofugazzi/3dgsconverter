@@ -1,3 +1,11 @@
+"""
+3D Gaussian Splatting Converter
+Copyright (c) 2023 Francesco Fugazzi
+
+This software is released under the MIT License.
+For more information about the license, please see the LICENSE file.
+"""
+
 import argparse
 
 class DensityFilterAction(argparse.Action):
@@ -25,3 +33,18 @@ class RemoveFlyersAction(argparse.Action):
         else:
             values = [25, 10.5]  # Default values if none are provided
         setattr(args, self.dest, values)
+        
+class AboutAction(argparse.Action):
+    def __init__(self, option_strings, dest, nargs=0, **kwargs):
+        super(AboutAction, self).__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        copyright_info = """
+        3D Gaussian Splatting Converter
+        Copyright (c) 2023 Francesco Fugazzi
+
+        This software is released under the MIT License.
+        For more information about the license, please see the LICENSE file.
+        """
+        print(copyright_info)
+        parser.exit()  # Exit after displaying the information.
