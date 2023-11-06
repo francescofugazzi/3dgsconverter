@@ -87,6 +87,7 @@ class BaseConverter:
         self.data = converted_data  # Update the internal data with the filtered data
         
         print(f"After density filter, retained {len(filtered_vertices)} out of {len(vertices)} vertices.")
+        return self.data
 
     def remove_flyers(self, k=25, threshold_factor=10.5, chunk_size=50000):
         debug_print("[DEBUG] Executing 'remove_flyers' function...")
@@ -130,6 +131,7 @@ class BaseConverter:
         self.data.elements = (new_vertex_element,) + self.data.elements[1:]
         
         print(f"After removing flyers, retained {len(vertices[combined_mask])} out of {len(vertices)} vertices.")
+        return self.data
 
 
     def define_dtype(self, has_scal, has_rgb=False):
@@ -171,3 +173,5 @@ class BaseConverter:
         ]
         # Print the number of vertices after cropping
         print(f"Number of vertices after cropping: {len(self.data['vertex'].data)}")
+        
+        return self.data
