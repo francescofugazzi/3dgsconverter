@@ -16,22 +16,6 @@ class Format3dgs(BaseConverter):
     def to_cc(self, bbox=None, apply_density_filter=False, remove_flyers=False, process_rgb=True):
         debug_print("[DEBUG] Starting conversion from 3DGS to CC...")
 
-        # Crop the data based on the bounding box if specified
-        if bbox:
-            min_x, min_y, min_z, max_x, max_y, max_z = bbox
-            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
-            debug_print("[DEBUG] Bounding box cropped.")
-        
-        # Apply density filter if required
-        if apply_density_filter:
-            self.apply_density_filter()
-            debug_print("[DEBUG] Density filter applied.")
-
-        # Remove flyers if required
-        if remove_flyers:
-            self.remove_flyers()
-            debug_print("[DEBUG] Flyers removed.")
-
         # Load vertices from the provided data
         vertices = self.data['vertex'].data
         debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
@@ -81,22 +65,6 @@ class Format3dgs(BaseConverter):
 
     def to_3dgs(self, bbox=None, apply_density_filter=False, remove_flyers=False):
         debug_print("[DEBUG] Starting conversion from 3DGS to 3DGS...")
-
-        # Crop the data based on the bounding box if specified
-        if bbox:
-            min_x, min_y, min_z, max_x, max_y, max_z = bbox
-            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
-            debug_print("[DEBUG] Bounding box cropped.")
-        
-        # Apply density filter if required
-        if apply_density_filter:
-            self.apply_density_filter()
-            debug_print("[DEBUG] Density filter applied.")
-
-        # Remove flyers if required
-        if remove_flyers:
-            self.remove_flyers()
-            debug_print("[DEBUG] Flyers removed.")
 
         # Load vertices from the updated data after all filters
         vertices = self.data['vertex'].data

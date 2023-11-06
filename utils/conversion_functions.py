@@ -10,6 +10,7 @@ import numpy as np
 from .format_3dgs import Format3dgs
 from .format_cc import FormatCC
 from utils.utility_functions import debug_print
+from .data_processing import process_data  # Place this import statement at the top with other imports
 
 def convert(data, source_format, target_format, **kwargs):
     debug_print(f"[DEBUG] Starting conversion from {source_format} to {target_format}...")
@@ -20,22 +21,9 @@ def convert(data, source_format, target_format, **kwargs):
         converter = FormatCC(data)
     else:
         raise ValueError("Unsupported source format")
-
-    # Apply optional operations
-    if kwargs.get("bbox"):
-        min_x, min_y, min_z, max_x, max_y, max_z = kwargs.get("bbox")
-        print("Cropping by bounding box...")
-        converter.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
-    if kwargs.get("density_filter"):
-        # Unpack the density filter values
-        voxel_size, threshold_percentage = kwargs.get("density_filter")
-        print(f"Applying density filter with voxel size: {voxel_size} and threshold percentage: {threshold_percentage}...")
-        converter.apply_density_filter(voxel_size=voxel_size, threshold_percentage=threshold_percentage)
-    if kwargs.get("remove_flyers"):
-        # Unpack the remove_flyers values
-        k, threshold_factor = kwargs.get("remove_flyers")
-        print(f"Removing flyers with k: {k} and threshold factor: {threshold_factor}...")
-        converter.remove_flyers(k=k, threshold_factor=threshold_factor)
+    
+    # Apply optional pre-processing steps using process_data (newly added)
+    process_data(converter, bbox=kwargs.get("bbox"), apply_density_filter=kwargs.get("density_filter"), remove_flyers=kwargs.get("remove_flyers"))
 
     # RGB processing
     if source_format == "3dgs" and target_format == "cc":

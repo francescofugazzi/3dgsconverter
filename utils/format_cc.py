@@ -16,22 +16,6 @@ class FormatCC(BaseConverter):
     def to_3dgs(self, bbox=None, apply_density_filter=False, remove_flyers=False):
         debug_print("[DEBUG] Starting conversion from CC to 3DGS...")
 
-        # Crop the data based on the bounding box if specified
-        if bbox:
-            min_x, min_y, min_z, max_x, max_y, max_z = bbox
-            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
-            debug_print("[DEBUG] Bounding box cropped.")
-        
-        # Apply density filter if required
-        if apply_density_filter:
-            self.data = self.apply_density_filter()
-            debug_print("[DEBUG] Density filter applied.")
-
-        # Remove flyers if required
-        if remove_flyers:
-            self.data = self.remove_flyers()
-            debug_print("[DEBUG] Flyers removed.")
-
         # Load vertices from the updated data after all filters
         vertices = self.data['vertex'].data
         debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
@@ -44,7 +28,7 @@ class FormatCC(BaseConverter):
         Utility.copy_data_with_prefix_check(vertices, converted_data, ["", "scal_", "scalar_", "scalar_scal_"])
 
         debug_print("[DEBUG] Data copying completed.")
-        debug_print("\\n[DEBUG] Sample of converted data (first 5 rows):")
+        debug_print("[DEBUG] Sample of converted data (first 5 rows):")
         if config.DEBUG:
             for i in range(5):
                 debug_print(converted_data[i])
@@ -55,22 +39,6 @@ class FormatCC(BaseConverter):
 
     def to_cc(self, bbox=None, apply_density_filter=False, remove_flyers=False, process_rgb=False):
         debug_print("[DEBUG] Processing CC data...")
-
-        # Crop the data based on the bounding box if specified
-        if bbox:
-            min_x, min_y, min_z, max_x, max_y, max_z = bbox
-            self.crop_by_bbox(min_x, min_y, min_z, max_x, max_y, max_z)
-            debug_print("[DEBUG] Bounding box cropped.")
-        
-        # Apply density filter if required
-        if apply_density_filter:
-            self.apply_density_filter()
-            debug_print("[DEBUG] Density filter applied.")
-
-        # Remove flyers if required
-        if remove_flyers:
-            self.remove_flyers()
-            debug_print("[DEBUG] Flyers removed.")
 
         # Check if RGB processing is required
         if process_rgb and not self.has_rgb():
