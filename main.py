@@ -44,6 +44,11 @@ def main():
     
     config.DEBUG = args.debug
 
+    # Check and append ".ply" extension if absent
+    if not args.output.lower().endswith('.ply'):
+        args.output += '.ply'
+
+    # Now check if the file exists after potentially appending the extension
     if os.path.exists(args.output):
         user_response = input(f"File {args.output} already exists. Do you want to overwrite it? (y/N): ").lower()
         if user_response != 'y':
@@ -106,14 +111,9 @@ def main():
                 # For PlyData, access the vertex data
                 data_to_convert = data['vertex'].data
             
-            # Print the type and properties of the data before conversion
-            print(f"Type of data to convert: {type(data_to_convert)}")
-            
             # Call the convert function and pass the data to convert
             converted_data = convert(data_to_convert, source_format, args.target_format, process_rgb=args.rgb, density_filter=args.density_filter, remove_flyers=args.remove_flyers, bbox=bbox_values, pool=pool)
             
-            # After conversion, print the type and properties of the converted data
-            print(f"Type of converted data: {type(converted_data)}")
     except KeyboardInterrupt:
         print("Caught KeyboardInterrupt, terminating workers")
         pool.terminate()
@@ -122,9 +122,6 @@ def main():
         
     # Check if the conversion actually happened and save the result
     if isinstance(converted_data, np.ndarray):
-        # Check and append ".ply" extension if absent
-        if not args.output.lower().endswith('.ply'):
-            args.output += '.ply'
         # Save the converted data to the output file
         PlyData([PlyElement.describe(converted_data, 'vertex')], byte_order='=').write(args.output)
         print(f"Conversion completed and saved to {args.output}.")
