@@ -13,11 +13,11 @@ from .utility_functions import debug_print
 from . import config
 
 class FormatCC(BaseConverter):
-    def to_3dgs(self, bbox=None, apply_density_filter=False, remove_flyers=False):
+    def to_3dgs(self):
         debug_print("[DEBUG] Starting conversion from CC to 3DGS...")
 
         # Load vertices from the updated data after all filters
-        vertices = self.data['vertex'].data
+        vertices = self.data
         debug_print(f"[DEBUG] Loaded {len(vertices)} vertices.")
 
         # Create a new structured numpy array for 3DGS format
@@ -37,7 +37,7 @@ class FormatCC(BaseConverter):
         return converted_data
 
 
-    def to_cc(self, bbox=None, apply_density_filter=False, remove_flyers=False, process_rgb=False):
+    def to_cc(self, process_rgb=False):
         debug_print("[DEBUG] Processing CC data...")
 
         # Check if RGB processing is required
@@ -56,26 +56,28 @@ class FormatCC(BaseConverter):
     def add_or_ignore_rgb(self, process_rgb=True):
         debug_print("[DEBUG] Checking RGB for CC data...")
 
-        # If RGB processing is required and if RGB is not present
+        # If RGB processing is required and RGB is not present
         if process_rgb and not self.has_rgb():
             # Compute RGB values for the data
             rgb_values = Utility.compute_rgb_from_vertex(self.data)
-            
-            # Define a new data type for the data that includes RGB
-            new_dtype = Utility.define_dtype(has_scal=True, has_rgb=True)
-            
-            # Create a new numpy array with the new data type
-            converted_data = np.zeros(self.data.shape, dtype=new_dtype)
-            
-            # Copy the data to the new numpy array
-            Utility.copy_data_with_prefix_check(self.data, converted_data)
-            
+
+            # Get the new dtype definition from the BaseConverter class
+            new_dtype_list, _ = BaseConverter.define_dtype(has_scal=True, has_rgb=True)
+            new_dtype = np.dtype(new_dtype_list)
+
+            # Create a new structured array that includes fields for RGB
+            # It should have the same number of rows as the original data
+            converted_data = np.zeros(self.data.shape[0], dtype=new_dtype)
+
+            # Copy the data to the new numpy array, preserving existing fields
+            for name in self.data.dtype.names:
+                converted_data[name] = self.data[name]
+
             # Add the RGB values to the new numpy array
             converted_data['red'] = rgb_values[:, 0]
             converted_data['green'] = rgb_values[:, 1]
             converted_data['blue'] = rgb_values[:, 2]
 
-            
             self.data = converted_data  # Update the instance's data with the new data
             debug_print("[DEBUG] RGB added to data.")
         else:

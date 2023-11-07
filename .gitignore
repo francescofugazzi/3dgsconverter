@@ -1,4 +1,5 @@
 *.ply
+*.parquet
 build
 __pycache__
 *.egg-info

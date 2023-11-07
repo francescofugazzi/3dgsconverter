@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 import numpy as np
+import pandas as pd
 from utils.utility import Utility
 from utils.conversion_functions import convert
 from plyfile import PlyData, PlyElement
@@ -17,6 +18,7 @@ from multiprocessing import Pool
 from utils import config
 from utils.utility_functions import init_worker
 from utils.argument_actions import DensityFilterAction, RemoveFlyersAction, AboutAction
+from utils.base_converter import BaseConverter
 
 __version__ = '0.1'
 
@@ -49,7 +51,11 @@ def main():
             return
 
     # Detect the format of the input file
-    source_format = Utility.text_based_detect_format(args.input)
+    if args.input.lower().endswith('.parquet'):
+        source_format = 'parquet'
+    else:
+        source_format = Utility.text_based_detect_format(args.input)
+
     if not source_format:
         print("The provided file is not a recognized 3D Gaussian Splat point cloud format.")
         return
@@ -61,6 +67,9 @@ def main():
         if source_format == "3dgs":
             print("Error: --rgb flag is not applicable for 3dgs to 3dgs conversion.")
             return
+        elif source_format == "parquet":
+            print("Error: --rgb flag is not applicable for parquet to 3dgs conversion.")
+            return
         else:
             print("Error: --rgb flag is not applicable for cc to 3dgs conversion.")
             return
@@ -71,19 +80,40 @@ def main():
             print("Error: Source CC file already contains RGB data. Conversion stopped.")
             return
 
-    # Read the data from the input file
-    data = PlyData.read(args.input)
-
-    # Print the number of vertices in the header
-    print(f"Number of vertices in the header: {len(data['vertex'].data)}")
+    # Read the data from the input file based on detected format
+    if source_format == 'parquet':
+        structured_data = BaseConverter.load_parquet(args.input)
+        
+        print(f"Number of vertices: {len(structured_data)}")
+    else:
+        data = PlyData.read(args.input)
+        if isinstance(data, PlyData) and 'vertex' in data:
+            print(f"Number of vertices in the header: {len(data['vertex'].data)}")
+            structured_data = data['vertex'].data
+        else:
+            print("Error: Data format is not PlyData with a 'vertex' field.")
+            return
 
     try:
         with Pool(initializer=init_worker) as pool:
             # If the bbox argument is provided, extract its values
             bbox_values = args.bbox if args.bbox else None
             
-            # Call the convert function and pass the bbox values (if provided)
-            converted_data = convert(data, source_format, args.target_format, process_rgb=args.rgb, density_filter=args.density_filter, remove_flyers=args.remove_flyers, bbox=bbox_values, pool=pool)
+            # If the data is a structured array from a Parquet file, pass it directly
+            if source_format == 'parquet':
+                data_to_convert = structured_data
+            else:
+                # For PlyData, access the vertex data
+                data_to_convert = data['vertex'].data
+            
+            # Print the type and properties of the data before conversion
+            print(f"Type of data to convert: {type(data_to_convert)}")
+            
+            # Call the convert function and pass the data to convert
+            converted_data = convert(data_to_convert, source_format, args.target_format, process_rgb=args.rgb, density_filter=args.density_filter, remove_flyers=args.remove_flyers, bbox=bbox_values, pool=pool)
+            
+            # After conversion, print the type and properties of the converted data
+            print(f"Type of converted data: {type(converted_data)}")
     except KeyboardInterrupt:
         print("Caught KeyboardInterrupt, terminating workers")
         pool.terminate()

@@ -1,20 +1,13 @@
-"""
-3D Gaussian Splatting Converter
-Copyright (c) 2023 Francesco Fugazzi
-
-This software is released under the MIT License.
-For more information about the license, please see the LICENSE file.
-"""
-
+import pandas as pd
 import numpy as np
 from .base_converter import BaseConverter
 from .utility_functions import debug_print
 from .utility import Utility
 from . import config
 
-class Format3dgs(BaseConverter):
+class FormatParquet(BaseConverter):
     def to_cc(self, process_rgb=True):
-        debug_print("[DEBUG] Starting conversion from 3DGS to CC...")
+        debug_print("[DEBUG] Starting conversion from PARQUET to CC...")
         
         # Load vertices from the provided data
         vertices = self.data
@@ -60,11 +53,11 @@ class Format3dgs(BaseConverter):
             Utility.copy_data_with_prefix_check(vertices, converted_data, [prefix])
 
         # For now, we'll just return the converted_data for the sake of this integration
-        debug_print("[DEBUG] Conversion from 3DGS to CC completed.")
+        debug_print("[DEBUG] Conversion from PARQUET to CC completed.")
         return converted_data
 
     def to_3dgs(self):
-        debug_print("[DEBUG] Starting conversion from 3DGS to 3DGS...")
+        debug_print("[DEBUG] Starting conversion from PARQUET to 3DGS...")
 
         # Load vertices from the updated data after all filters
         vertices = self.data
@@ -83,5 +76,5 @@ class Format3dgs(BaseConverter):
             for i in range(5):
                 debug_print(converted_data[i])
 
-        debug_print("[DEBUG] Conversion from 3DGS to 3DGS completed.")
+        debug_print("[DEBUG] Conversion from PARQUET to 3DGS completed.")
         return converted_data

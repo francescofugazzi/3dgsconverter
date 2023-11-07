@@ -7,6 +7,7 @@ For more information about the license, please see the LICENSE file.
 """
 
 import numpy as np
+import pandas as pd
 from .utility import *
 from plyfile import PlyData, PlyElement
 from collections import deque
@@ -50,7 +51,11 @@ class BaseConverter:
 
     def apply_density_filter(self, voxel_size=1.0, threshold_percentage=0.32):
         debug_print("[DEBUG] Executing 'apply_density_filter' function...")
-        vertices = self.data['vertex'].data
+        # Ensure self.data is a numpy structured array
+        if not isinstance(self.data, np.ndarray):
+            raise TypeError("self.data must be a numpy structured array.")
+            
+        vertices = self.data  # This assumes self.data is already a numpy structured array
 
         # Convert threshold_percentage into a ratio
         threshold_ratio = threshold_percentage / 100.0
@@ -78,33 +83,38 @@ class BaseConverter:
                 if len(current_cluster) > len(max_cluster):
                     max_cluster = current_cluster
 
+        # Filter vertices to only include those in dense voxels
         filtered_vertices = [vertex for vertex in vertices if (int(vertex['x'] / voxel_size), int(vertex['y'] / voxel_size), int(vertex['z'] / voxel_size)) in max_cluster]
-        new_vertex_element = PlyElement.describe(np.array(filtered_vertices, dtype=vertices.dtype), 'vertex')
-        
-        # Update the plydata elements and the internal self.data
-        converted_data = self.data
-        converted_data.elements = (new_vertex_element,) + converted_data.elements[1:]
-        self.data = converted_data  # Update the internal data with the filtered data
-        
-        print(f"After density filter, retained {len(filtered_vertices)} out of {len(vertices)} vertices.")
+
+        # Convert the filtered vertices list to a numpy structured array
+        self.data = np.array(filtered_vertices, dtype=vertices.dtype)
+
+        # Informative print statement
+        print(f"After density filter, retained {len(self.data)} out of {len(vertices)} vertices.")
+
+        # Since we're working with numpy arrays, just return self.data
         return self.data
 
     def remove_flyers(self, k=25, threshold_factor=10.5, chunk_size=50000):
         debug_print("[DEBUG] Executing 'remove_flyers' function...")
 
+        # Ensure self.data is a numpy structured array
+        if not isinstance(self.data, np.ndarray):
+            raise TypeError("self.data must be a numpy structured array.")
+
         # Extract vertex data from the current object's data
-        vertices = self.data['vertex'].data
+        vertices = self.data
         num_vertices = len(vertices)
         
         # Display the number of input vertices
-        debug_print(f"[DEBUG] Number of input vertices: {len(vertices)}")
+        debug_print(f"[DEBUG] Number of input vertices: {num_vertices}")
         
         # Adjust k based on the number of vertices
         k = max(3, min(k, num_vertices // 100))  # Example: ensure k is between 3 and 1% of the total vertices
         debug_print(f"[DEBUG] Adjusted k to: {k}")
 
         # Number of chunks
-        num_chunks = len(vertices) // chunk_size + (len(vertices) % chunk_size > 0)
+        num_chunks = (num_vertices + chunk_size - 1) // chunk_size  # Ceiling division
         masks = []
 
         # Create a pool of workers
@@ -112,7 +122,7 @@ class BaseConverter:
         with Pool(processes=num_cores, initializer=init_worker) as pool:
             for i in range(num_chunks):
                 start_idx = i * chunk_size
-                end_idx = start_idx + chunk_size
+                end_idx = min(start_idx + chunk_size, num_vertices)  # Avoid going out of bounds
                 chunk_coords = np.vstack((vertices['x'][start_idx:end_idx], vertices['y'][start_idx:end_idx], vertices['z'][start_idx:end_idx])).T
 
                 # Compute K-Nearest Neighbors for the chunk
@@ -129,17 +139,14 @@ class BaseConverter:
         # Combine masks from all chunks
         combined_mask = np.concatenate(masks)
 
-        # Generate a new PlyElement with the filtered vertices based on the combined mask
-        new_vertex_element = PlyElement.describe(vertices[combined_mask], 'vertex')
-
-        # Update the plydata elements and the internal self.data
-        self.data.elements = (new_vertex_element,) + self.data.elements[1:]
+        # Apply the mask to the vertices and store the result in self.data
+        self.data = vertices[combined_mask]
         
-        print(f"After removing flyers, retained {len(vertices[combined_mask])} out of {len(vertices)} vertices.")
+        print(f"After removing flyers, retained {np.count_nonzero(combined_mask)} out of {num_vertices} vertices.")
         return self.data
 
-
-    def define_dtype(self, has_scal, has_rgb=False):
+    @staticmethod
+    def define_dtype(has_scal, has_rgb=False):
         debug_print("[DEBUG] Executing 'define_dtype' function...")
         
         prefix = 'scalar_scal_' if has_scal else ''
@@ -164,19 +171,106 @@ class BaseConverter:
         return dtype, prefix
     
     def has_rgb(self):
-        return 'red' in self.data['vertex'].data.dtype.names and 'green' in self.data['vertex'].data.dtype.names and 'blue' in self.data['vertex'].data.dtype.names
-    
+        return 'red' in self.data.dtype.names and 'green' in self.data.dtype.names and 'blue' in self.data.dtype.names
+
     def crop_by_bbox(self, min_x, min_y, min_z, max_x, max_y, max_z):
         # Perform cropping based on the bounding box
-        self.data['vertex'].data = self.data['vertex'].data[
-            (self.data['vertex'].data['x'] >= min_x) &
-            (self.data['vertex'].data['x'] <= max_x) &
-            (self.data['vertex'].data['y'] >= min_y) &
-            (self.data['vertex'].data['y'] <= max_y) &
-            (self.data['vertex'].data['z'] >= min_z) &
-            (self.data['vertex'].data['z'] <= max_z)
+        self.data = self.data[
+            (self.data['x'] >= min_x) &
+            (self.data['x'] <= max_x) &
+            (self.data['y'] >= min_y) &
+            (self.data['y'] <= max_y) &
+            (self.data['z'] >= min_z) &
+            (self.data['z'] <= max_z)
         ]
         # Print the number of vertices after cropping
-        print(f"Number of vertices after cropping: {len(self.data['vertex'].data)}")
-        
-        return self.data
+        debug_print(f"[DEBUG] Number of vertices after cropping: {len(self.data)}")
+
+    @staticmethod
+    def load_parquet(file_path):
+            # Load the Parquet file into a DataFrame
+            df = pd.read_parquet(file_path)
+            
+            # Define a mapping from the Parquet column names to the expected dtype names
+            column_mapping = {
+                'x': 'x',
+                'y': 'y',
+                'z': 'z',
+                # Assuming 'nx', 'ny', 'nz' need to be created and set to 0
+                'r_sh0': 'f_dc_0',
+                'g_sh0': 'f_dc_1',
+                'b_sh0': 'f_dc_2',
+                'r_sh1': 'f_rest_0',
+                'r_sh2': 'f_rest_1',
+                'r_sh3': 'f_rest_2',
+                'r_sh4': 'f_rest_3',
+                'r_sh5': 'f_rest_4',
+                'r_sh6': 'f_rest_5',
+                'r_sh7': 'f_rest_6',
+                'r_sh8': 'f_rest_7',
+                'r_sh9': 'f_rest_8',
+                'r_sh10': 'f_rest_9',
+                'r_sh11': 'f_rest_10',
+                'r_sh12': 'f_rest_11',
+                'r_sh13': 'f_rest_12',
+                'r_sh14': 'f_rest_13',
+                'r_sh15': 'f_rest_14',
+                'g_sh1': 'f_rest_15',
+                'g_sh2': 'f_rest_16',
+                'g_sh3': 'f_rest_17',
+                'g_sh4': 'f_rest_18',
+                'g_sh5': 'f_rest_19',
+                'g_sh6': 'f_rest_20',
+                'g_sh7': 'f_rest_21',
+                'g_sh8': 'f_rest_22',
+                'g_sh9': 'f_rest_23',
+                'g_sh10': 'f_rest_24',
+                'g_sh11': 'f_rest_25',
+                'g_sh12': 'f_rest_26',
+                'g_sh13': 'f_rest_27',
+                'g_sh14': 'f_rest_28',
+                'g_sh15': 'f_rest_29',
+                'b_sh1': 'f_rest_30',
+                'b_sh2': 'f_rest_31',
+                'b_sh3': 'f_rest_32',
+                'b_sh4': 'f_rest_33',
+                'b_sh5': 'f_rest_34',
+                'b_sh6': 'f_rest_35',
+                'b_sh7': 'f_rest_36',
+                'b_sh8': 'f_rest_37',
+                'b_sh9': 'f_rest_38',
+                'b_sh10': 'f_rest_39',
+                'b_sh11': 'f_rest_40',
+                'b_sh12': 'f_rest_41',
+                'b_sh13': 'f_rest_42',
+                'b_sh14': 'f_rest_43',
+                'b_sh15': 'f_rest_44',
+                'alpha': 'opacity',
+                'cov_s0': 'scale_0',
+                'cov_s1': 'scale_1',
+                'cov_s2': 'scale_2',
+                'cov_q3': 'rot_0',
+                'cov_q0': 'rot_1',
+                'cov_q1': 'rot_2',
+                'cov_q2': 'rot_3',
+            }
+
+            for col in ['nx', 'ny', 'nz']:
+                if col not in df.columns:
+                    df[col] = 0.0
+
+            # Rename the DataFrame columns according to the mapping
+            df_renamed = df.rename(columns=column_mapping)
+
+            # Fetch the dtype from BaseConverter
+            dtype_list, _ = BaseConverter.define_dtype(has_scal=False, has_rgb=False)
+            
+            # Convert the dtype list to a structured dtype object
+            dtype_structured = np.dtype(dtype_list)
+
+            # Convert DataFrame to a structured array with the defined dtype
+            structured_array = np.zeros(df_renamed.shape[0], dtype=dtype_structured)
+            for name in dtype_structured.names:
+                structured_array[name] = df_renamed[name].values if name in df_renamed.columns else 0
+
+            return structured_array

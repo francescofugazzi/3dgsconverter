@@ -72,7 +72,7 @@ class Utility:
         if 'f_dc_0' in vertices.dtype.names:
             f_dc = np.column_stack((vertices['f_dc_0'], vertices['f_dc_1'], vertices['f_dc_2']))
         else:
-            f_dc = np.column_stack((vertices['scal_f_dc_0'], vertices['scal_f_dc_1'], vertices['scal_f_dc_2']))
+            f_dc = np.column_stack((vertices['scalar_scal_f_dc_0'], vertices['scalar_scal_f_dc_1'], vertices['scalar_scal_f_dc_2']))
         
         colors = (f_dc + 1) * 127.5
         colors = np.clip(colors, 0, 255).astype(np.uint8)
