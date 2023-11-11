@@ -10,15 +10,14 @@ import argparse
 import os
 import sys
 import numpy as np
-import pandas as pd
-from utils.utility import Utility
-from utils.conversion_functions import convert
+from .utils.utility import Utility
+from .utils.conversion_functions import convert
 from plyfile import PlyData, PlyElement
 from multiprocessing import Pool
-from utils import config
-from utils.utility_functions import init_worker
-from utils.argument_actions import DensityFilterAction, RemoveFlyersAction, AboutAction
-from utils.base_converter import BaseConverter
+from .utils import config
+from .utils.utility_functions import init_worker
+from .utils.argument_actions import DensityFilterAction, RemoveFlyersAction, AboutAction
+from .utils.base_converter import BaseConverter
 
 __version__ = '0.1'
 

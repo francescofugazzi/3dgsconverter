@@ -10,7 +10,7 @@ import numpy as np
 from .format_3dgs import Format3dgs
 from .format_cc import FormatCC
 from .format_parquet import FormatParquet
-from utils.utility_functions import debug_print
+from .utility_functions import debug_print
 from .data_processing import process_data  # Place this import statement at the top with other imports
 
 def convert(data, source_format, target_format, **kwargs):

@@ -9,7 +9,6 @@ For more information about the license, please see the LICENSE file.
 import numpy as np
 import pandas as pd
 from .utility import *
-from plyfile import PlyData, PlyElement
 from collections import deque
 from multiprocessing import Pool, cpu_count
 from sklearn.neighbors import NearestNeighbors
@@ -185,6 +184,11 @@ class BaseConverter:
         ]
         # Print the number of vertices after cropping
         debug_print(f"[DEBUG] Number of vertices after cropping: {len(self.data)}")
+        
+        # Informative print statement
+        print(f"After cropping, retained {len(self.data)} vertices.")
+
+        return self.data
 
     @staticmethod
     def load_parquet(file_path):
