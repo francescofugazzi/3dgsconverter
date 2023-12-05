@@ -19,7 +19,7 @@ There are two ways to install the 3D Gaussian Splatting Converter:
 Directly install the app from GitHub using pip. This method is straightforward and recommended for most users.
 
   ```bash
-  pip install https://github.com/francescofugazzi/3dgsconverter
+  pip install git+https://github.com/francescofugazzi/3dgsconverter.git
   ```
 
 **2. Installation by Cloning the Repository:**:
@@ -57,7 +57,7 @@ Here are some basic examples to get you started:
 **4. Applying Density Filter and Removing floaters during conversion:**:
 
    ```bash
-   gsconverter -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove_fliers
+   gsconverter -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove_flyers
    ```
 
 For a full list of parameters and their descriptions, you can use the `-h` or `--help` argument:
