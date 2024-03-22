@@ -10,7 +10,7 @@ with open('requirements.txt') as f:
 
 setup(
     name='gsconverter',
-    version='0.1',
+    version='0.2',
     author='Francesco Fugazzi',
     #author_email='your.email@example.com',
     description='3D Gaussian Splatting Converter',
@@ -21,7 +21,7 @@ setup(
     install_requires=requirements,
     classifiers=[
         'Programming Language :: Python :: 3',
-        'License :: OSI Approved :: MIT License',
+        'License :: MIT License',
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.8',

@@ -39,25 +39,25 @@ Here are some basic examples to get you started:
 **1. Conversion from 3DGS to Cloud Compare format with RGB addition**:
 
    ```bash
-   gsconverter -i input_3dgs.ply -o output_cc.ply -f cc --rgb
+   3dgsconverter -i input_3dgs.ply -o output_cc.ply -f cc --rgb
    ```
 
 **2. Conversion from Cloud Compare format back to 3DGS:**:
 
    ```bash
-   gsconverter -i input_cc.ply -o output_3dgs.ply -f 3dgs
+   3dgsconverter -i input_cc.ply -o output_3dgs.ply -f 3dgs
    ```
 
 **3. Applying Density Filter during conversion:**:
 
    ```bash
-   gsconverter -i input_3dgs.ply -o output_cc.ply -f cc --density_filter
+   3dgsconverter -i input_3dgs.ply -o output_cc.ply -f cc --density_filter
    ```
 
 **4. Applying Density Filter and Removing floaters during conversion:**:
 
    ```bash
-   gsconverter -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove_flyers
+   3dgsconverter -i input_3dgs.ply -o output_cc.ply -f cc --density_filter --remove_flyers
    ```
 
 For a full list of parameters and their descriptions, you can use the `-h` or `--help` argument:
