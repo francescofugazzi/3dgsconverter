@@ -1,4 +1,8 @@
 scikit-learn
 plyfile
-pandas
-pyarrow
+numpy
+scipy
+scikit-learn
+pillow
+tqdm
+taichi

@@ -10,9 +10,9 @@ with open('requirements.txt') as f:
 
 setup(
     name='gsconverter',
-    version='0.2',
+    version='0.8',
     author='Francesco Fugazzi',
-    #author_email='your.email@example.com',
+
     description='3D Gaussian Splatting Converter',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -28,6 +28,9 @@ setup(
     entry_points={
         'console_scripts': [
             '3dgsconverter=gsconverter.main:main',
+            'gsconverter=gsconverter.main:main',
+            '3dgsconv=gsconverter.main:main',
+            'gsconv=gsconverter.main:main',
         ],
     },  
 )

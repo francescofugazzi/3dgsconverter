@@ -1,6 +1,16 @@
 *.ply
 *.parquet
 build
+docs
 __pycache__
 *.egg-info
 *.zip
+*.webp
+*.spz
+*.ksplat
+*.sogs
+*.sog
+*.splat
+.venv
+
+
