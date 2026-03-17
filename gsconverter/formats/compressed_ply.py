@@ -13,7 +13,7 @@ class CompressedPlyFormat(BaseFormat):
 
     def read(self, path: str, **kwargs) -> np.ndarray:
         debug_print(f"[DEBUG] Reading Compressed PLY file from {path}")
-        from plyfile import PlyData
+        from ..utils.ply_utils import PlyData
         plydata = PlyData.read(path)
         
         # Verify it's a compressed PLY (must have chunk element)
@@ -378,7 +378,7 @@ class CompressedPlyFormat(BaseFormat):
         return q[:, 0], q[:, 1], q[:, 2], q[:, 3]
 
     def _write_ply_file(self, path, chunk_data, vertex_data, sh_data):
-        from plyfile import PlyData, PlyElement
+        from ..utils.ply_utils import PlyData, PlyElement
         elements = [PlyElement.describe(chunk_data, 'chunk'), PlyElement.describe(vertex_data, 'vertex')]
         if sh_data is not None:
             elements.append(PlyElement.describe(sh_data, 'sh'))
