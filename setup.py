@@ -1,4 +1,5 @@
 from setuptools import setup, find_packages
+from gsconverter.version import __version__
 
 # Read the contents of your README file
 with open('README.md', encoding='utf-8') as f:
@@ -10,7 +11,7 @@ with open('requirements.txt') as f:
 
 setup(
     name='gsconverter',
-    version='0.8',
+    version=__version__,
     author='Francesco Fugazzi',
 
     description='3D Gaussian Splatting Converter',

@@ -1,5 +1,4 @@
 from .converter import Converter
-
-__version__ = '0.8'
+from .version import __version__
 
 __all__ = ['Converter']

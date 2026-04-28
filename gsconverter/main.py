@@ -11,9 +11,7 @@ import os
 import sys
 from .converter import Converter
 from .utils import config
-
-
-__version__ = '0.8'
+from .version import __version__
 
 class AboutAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
