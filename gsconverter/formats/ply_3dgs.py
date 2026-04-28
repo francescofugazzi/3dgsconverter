@@ -62,8 +62,10 @@ class Ply3DGSFormat(BaseFormat):
     def write(self, data: np.ndarray, path: str, **kwargs) -> None:
         debug_print(f"[DEBUG] Writing 3DGS PLY file to {path}")
         
-        has_rgb = 'red' in data.dtype.names
-        std_order = GaussianStruct.get_standard_order(has_rgb=has_rgb)
+        # The canonical 3DGS PLY format does not keep explicit RGB channels.
+        # CloudCompare-style RGB is an intermediate convenience, not part of the
+        # standard 3DGS output schema.
+        std_order = GaussianStruct.get_standard_order(has_rgb=False)
         
         # Determine if SH cropping is required (Degree < 3)
         crop_sh = kwargs.get('crop_sh', False)
@@ -95,7 +97,7 @@ class Ply3DGSFormat(BaseFormat):
         
         # 2. Extra Fields at the end (truly unknown ones)
         # Exclude standard names to avoid re-adding cropped attributes as extras
-        full_std_names = set(GaussianStruct.get_standard_order(has_rgb=True)) | {'nx', 'ny', 'nz'}
+        full_std_names = set(GaussianStruct.get_standard_order(has_rgb=False)) | {'nx', 'ny', 'nz', 'red', 'green', 'blue'}
         for name in actual_fields:
             if name not in std_order and name not in full_std_names:
                 output_dtype_list.append((name, data.dtype[name].str))

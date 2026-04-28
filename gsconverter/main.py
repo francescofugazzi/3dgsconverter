@@ -27,7 +27,6 @@ def check_source_extras(path):
     # Lightweight check for extra PLY elements
     try:
         if path.lower().endswith('.ply'):
-            from ..utils.ply_utils import PlyData
             # Read header only — lightweight text-based scan
             # PlyData.read parses the file. For large files this might be slow if it reads body.
             # However, standard PlyData.read reads everything. 
@@ -43,12 +42,45 @@ def check_source_extras(path):
                          break
             header_str = header.decode('utf-8', errors='ignore')
             for line in header_str.split('\n'):
-                 if line.startswith('element'):
-                     parts = line.split()
-                     if len(parts) >= 2:
-                         name = parts[1]
-                         if name not in ['vertex', 'face']: # Standard elements
-                             return True
+                if line.startswith('element'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        name = parts[1]
+                        if name not in ['vertex', 'face']: # Standard elements
+                            return True
+    except:
+        pass
+    return False
+
+def check_source_rgb(path):
+    # Lightweight check for explicit RGB properties in a PLY header.
+    try:
+        if path.lower().endswith('.ply'):
+            with open(path, 'rb') as f:
+                header = b""
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break
+                    header += line
+                    if b"end_header" in line:
+                        break
+            header_str = header.decode('utf-8', errors='ignore')
+            has_r = False
+            has_g = False
+            has_b = False
+            for line in header_str.split('\n'):
+                if line.startswith('property'):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        prop_name = parts[2]
+                        if prop_name == 'red':
+                            has_r = True
+                        elif prop_name == 'green':
+                            has_g = True
+                        elif prop_name == 'blue':
+                            has_b = True
+            return has_r and has_g and has_b
     except:
         pass
     return False
@@ -83,9 +115,9 @@ def report_info(input_path, converter_obj=None):
                     print(f"Block Size: {s0.get('bucketBlockSize')}")
                 if 'min_sh' in meta:
                     print(f"SH Range: [{meta['min_sh']:.2f}, {meta['max_sh']:.2f}]")
-        
+
         if converter_obj.source_format == 'compressed_ply':
-            from ..utils.ply_utils import PlyData
+            from .utils.ply_utils import PlyData
             ply = PlyData.read(abs_path)
             num_chunks = len(ply['chunk'].data)
             print(f"Quantization: Chunk-based (256 splats/chunk)")
@@ -135,7 +167,7 @@ def report_info(input_path, converter_obj=None):
 
         if input_path.lower().endswith('.ply'):
             try:
-                from ..utils.ply_utils import PlyData
+                from .utils.ply_utils import PlyData
                 pd = PlyData.read(input_path)
                 
                 is_compressed = 'chunk' in pd
@@ -393,9 +425,11 @@ def main():
     
     # Check for presence of extra elements in source
     has_source_extras = check_source_extras(args.input)
+    has_source_rgb = check_source_rgb(args.input)
     
     # "Stripping" is an action. If source has extras and valid flag is NOT set, we are stripping.
     is_stripping_action = has_source_extras and not args.extra_elements
+    is_stripping_rgb = has_source_rgb and args.target_format == '3dgs'
     
     # "Maintaining" is a no-op if inputs are same.
     # So if has_source_extras AND args.extra_elements, that doesn't count as an active filter (it preserves status quo).
@@ -416,6 +450,7 @@ def main():
         args.sh_level is not None,
         args.min_opacity,
         args.keep_multicluster,
+        is_stripping_rgb,
         # Compression > 0 is an action. Converting format is also an action.
         # This check prevents PLY->PLY no-ops.
         is_stripping_action
