@@ -1,5 +1,5 @@
 import numpy as np
-from plyfile import PlyData, PlyElement
+from ..utils.ply_utils import PlyData, PlyElement
 from .base import BaseFormat
 from ..structures import GaussianStruct
 from ..utils.utility_functions import debug_print

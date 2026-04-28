@@ -27,8 +27,8 @@ def check_source_extras(path):
     # Lightweight check for extra PLY elements
     try:
         if path.lower().endswith('.ply'):
-            from plyfile import PlyData
-            # Read header only? plyfile reads header on init but let's be safe
+            from ..utils.ply_utils import PlyData
+            # Read header only — lightweight text-based scan
             # PlyData.read parses the file. For large files this might be slow if it reads body.
             # However, standard PlyData.read reads everything. 
             # We can use a text-based scan for "element" lines that are not "vertex" or "face"?
@@ -85,7 +85,7 @@ def report_info(input_path, converter_obj=None):
                     print(f"SH Range: [{meta['min_sh']:.2f}, {meta['max_sh']:.2f}]")
         
         if converter_obj.source_format == 'compressed_ply':
-            from plyfile import PlyData
+            from ..utils.ply_utils import PlyData
             ply = PlyData.read(abs_path)
             num_chunks = len(ply['chunk'].data)
             print(f"Quantization: Chunk-based (256 splats/chunk)")
@@ -135,7 +135,7 @@ def report_info(input_path, converter_obj=None):
 
         if input_path.lower().endswith('.ply'):
             try:
-                from plyfile import PlyData
+                from ..utils.ply_utils import PlyData
                 pd = PlyData.read(input_path)
                 
                 is_compressed = 'chunk' in pd
@@ -218,7 +218,7 @@ def report_info(input_path, converter_obj=None):
                             active_msg += " (Cropped/Zeroed)"
 
             except Exception as e:
-                # Handle plyfile errors gracefully
+                # Handle PLY parse errors gracefully
                 print(f"Warning: Could not parse PLY header for SH analysis: {e}")
                 pass 
         
