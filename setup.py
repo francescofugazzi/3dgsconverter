@@ -1,5 +1,7 @@
+from pathlib import Path
+import re
+
 from setuptools import setup, find_packages
-from gsconverter.version import __version__
 
 # Read the contents of your README file
 with open('README.md', encoding='utf-8') as f:
@@ -9,9 +11,17 @@ with open('README.md', encoding='utf-8') as f:
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
+
+def read_version():
+    version_file = Path(__file__).with_name('gsconverter').joinpath('version.py')
+    match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", version_file.read_text(encoding='utf-8'))
+    if not match:
+        raise RuntimeError("Unable to find package version")
+    return match.group(1)
+
 setup(
     name='gsconverter',
-    version=__version__,
+    version=read_version(),
     author='Francesco Fugazzi',
 
     description='3D Gaussian Splatting Converter',
