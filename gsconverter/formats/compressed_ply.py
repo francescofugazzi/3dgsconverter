@@ -1,6 +1,7 @@
 import numpy as np
 import struct
 from .base import BaseFormat
+from ..structures import GaussianStruct
 from ..utils.utility_functions import debug_print
 
 class CompressedPlyFormat(BaseFormat):
@@ -36,10 +37,7 @@ class CompressedPlyFormat(BaseFormat):
         # Default to 0 (DC) since standard PLY always has color/DC
         max_sh_deg = 0
         if sh_names:
-             n_coeffs = len(sh_names)
-             if n_coeffs >= 45: max_sh_deg = 3
-             elif n_coeffs >= 24: max_sh_deg = 2
-             elif n_coeffs >= 9: max_sh_deg = 1
+             max_sh_deg = GaussianStruct.infer_sh_degree_from_names(sh_names)
         
         self.metadata = {
              'count': num_splats,
@@ -144,7 +142,7 @@ class CompressedPlyFormat(BaseFormat):
         
         if all_sh_names:
             # Check backwards from 44 down to 0 to find the last non-zero coefficient
-            for i in range(44, -1, -1):
+            for i in range(GaussianStruct.sh_coeff_count(4) - 1, -1, -1):
                 fname = f'f_rest_{i}'
                 if fname in data.dtype.names:
                     # Check if any value is non-zero
@@ -155,16 +153,14 @@ class CompressedPlyFormat(BaseFormat):
                         break
             
             # Determine degree
-            if last_active_idx >= 24: target_degree = 3
+            if last_active_idx >= 45: target_degree = 4
+            elif last_active_idx >= 24: target_degree = 3
             elif last_active_idx >= 9: target_degree = 2
             elif last_active_idx >= 0: target_degree = 1
             else: target_degree = 0
             
         # Select names corresponding to the target degree
-        needed_coeffs = 0
-        if target_degree == 3: needed_coeffs = 45
-        elif target_degree == 2: needed_coeffs = 24
-        elif target_degree == 1: needed_coeffs = 9
+        needed_coeffs = GaussianStruct.sh_coeff_count(target_degree)
         
         sh_names = [f'f_rest_{i}' for i in range(needed_coeffs) if f'f_rest_{i}' in data.dtype.names]
         num_sh = len(sh_names)

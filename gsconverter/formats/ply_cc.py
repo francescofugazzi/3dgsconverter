@@ -26,7 +26,8 @@ class PlyCCFormat(BaseFormat):
             source_prefix = "scalar_scal_"
             
         # 2. Identify Extra Fields
-        std_base_names = GaussianStruct.get_standard_order(has_rgb=True)
+        sh_degree = GaussianStruct.infer_sh_degree_from_names(source_names)
+        std_base_names = GaussianStruct.get_standard_order(has_rgb=True, sh_degree=sh_degree)
         std_base_names.extend(['nx', 'ny', 'nz'])
         
         std_source_names = {source_prefix + name for name in std_base_names} | set(std_base_names)
@@ -41,7 +42,7 @@ class PlyCCFormat(BaseFormat):
         
         # 3. Define Internal Dtype
         has_rgb = 'red' in source_names
-        internal_dtype, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=has_rgb, extra_fields=extra_fields)
+        internal_dtype, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=has_rgb, extra_fields=extra_fields, sh_degree=sh_degree)
         converted_data = np.zeros(len(vertices), dtype=internal_dtype)
         
         # 4. Map Fields
@@ -65,11 +66,13 @@ class PlyCCFormat(BaseFormat):
         debug_print(f"[DEBUG] Writing CC PLY file to {path}")
         
         has_rgb = 'red' in data.dtype.names
-        std_order = GaussianStruct.get_standard_order(has_rgb=has_rgb)
+        source_sh_degree = GaussianStruct.infer_sh_degree_from_names(data.dtype.names)
+        output_sh_degree = max(3, source_sh_degree)
+        std_order = GaussianStruct.get_standard_order(has_rgb=has_rgb, sh_degree=output_sh_degree)
         crop_sh = kwargs.get('crop_sh', False)
         if crop_sh:
             last_idx = -1
-            for i in range(44, -1, -1):
+            for i in range(GaussianStruct.sh_coeff_count(4) - 1, -1, -1):
                 f_name = f'f_rest_{i}'
                 if f_name in data.dtype.names and np.any(data[f_name]):
                     last_idx = i
@@ -101,7 +104,7 @@ class PlyCCFormat(BaseFormat):
         
         # 2. Extra Fields at the end (get scalar_ prefix block)
         # Exclude standard names (even if not in std_order due to cropping)
-        full_std_names = set(GaussianStruct.get_standard_order(has_rgb=True)) | {'nx', 'ny', 'nz'}
+        full_std_names = set(GaussianStruct.get_standard_order(has_rgb=True, sh_degree=4)) | {'nx', 'ny', 'nz'}
         for name in actual_fields:
             if name not in std_order and name not in full_std_names:
                 out_name = f"scalar_{name}"

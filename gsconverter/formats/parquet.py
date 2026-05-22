@@ -19,13 +19,20 @@ class ParquetFormat(BaseFormat):
             'cov_q3': 'rot_0', 'cov_q0': 'rot_1', 'cov_q1': 'rot_2', 'cov_q2': 'rot_3',
         }
         
-        # Generate mapping for SH coefficients (r_sh1-15, g_sh1-15, b_sh1-15)
-        
-        # 15 coeffs per channel
-        
+        # Generate mapping for SH coefficients (r_sh1-N, g_sh1-N, b_sh1-N)
+        max_sh_idx = 0
+        for col in df.columns:
+            if '_sh' not in col:
+                continue
+            try:
+                suffix = int(col.rsplit('_sh', 1)[1])
+            except (IndexError, ValueError):
+                continue
+            max_sh_idx = max(max_sh_idx, suffix)
+
         rest_idx = 0
         for channel in ['r', 'g', 'b']:
-            for i in range(1, 16):
+            for i in range(1, max_sh_idx + 1):
                 col_name = f'{channel}_sh{i}'
                 dest_name = f'f_rest_{rest_idx}'
                 column_mapping[col_name] = dest_name
@@ -44,7 +51,8 @@ class ParquetFormat(BaseFormat):
         # Prepare standard dtype
         # Check if RGB columns are available
         has_rgb = 'red' in df_renamed.columns
-        standard_dtype_list, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=has_rgb)
+        sh_degree = GaussianStruct.infer_sh_degree_from_names(df_renamed.columns)
+        standard_dtype_list, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=has_rgb, sh_degree=sh_degree)
         final_dtype = np.dtype(standard_dtype_list)
         converted_data = np.zeros(len(df), dtype=final_dtype)
         
@@ -71,10 +79,12 @@ class ParquetFormat(BaseFormat):
         
         # Map f_rest to channel_shX (Inria order 0-14 R, 15-29 G, 30-44 B)
         # Taichi expects r_sh1...15 etc.
-        for i in range(15):
+        max_sh_degree = GaussianStruct.infer_sh_degree_from_names(data.dtype.names)
+        coeffs_per_channel = GaussianStruct.sh_coeff_count(max_sh_degree) // 3
+        for i in range(coeffs_per_channel):
             reverse_mapping[f'f_rest_{i}'] = f'r_sh{i+1}'
-            reverse_mapping[f'f_rest_{15+i}'] = f'g_sh{i+1}'
-            reverse_mapping[f'f_rest_{30+i}'] = f'b_sh{i+1}'
+            reverse_mapping[f'f_rest_{coeffs_per_channel+i}'] = f'g_sh{i+1}'
+            reverse_mapping[f'f_rest_{2*coeffs_per_channel+i}'] = f'b_sh{i+1}'
             
         # 2. Define Strict Column Order (Taichi Standard)
         column_order = ['x', 'y', 'z']
@@ -87,7 +97,7 @@ class ParquetFormat(BaseFormat):
         
         # SH order: channel by channel
         for channel in ['r', 'g', 'b']:
-            for i in range(16):
+            for i in range(coeffs_per_channel + 1):
                 column_order.append(f'{channel}_sh{i}')
         
         # 3. Process DataFrame

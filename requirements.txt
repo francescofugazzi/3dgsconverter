@@ -1,8 +1,8 @@
 scikit-learn
 numpy
 scipy
-scikit-learn
 pillow
 tqdm
 taichi
 pandas
+zstandard

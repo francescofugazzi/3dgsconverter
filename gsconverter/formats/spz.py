@@ -4,6 +4,10 @@ import struct
 import zlib
 import gzip
 import io
+try:
+    import zstandard as zstd
+except ImportError:  # pragma: no cover - optional dependency for SPZ v4
+    zstd = None
 from .base import BaseFormat
 from ..structures import GaussianStruct
 from ..utils.utility_functions import debug_print, status_print
@@ -20,48 +24,45 @@ class SpzFormat(BaseFormat):
         
         with open(path, 'rb') as f:
             file_data = f.read()
-            
+
+        if len(file_data) >= 4 and file_data[:4] == b'NGSP':
+            return self._read_v4(file_data)
+
         # Check if file starts with GZIP magic (1f 8b)
         is_gzip = (len(file_data) > 2 and file_data[0] == 0x1f and file_data[1] == 0x8b)
-        
+
         raw_data = file_data
         if is_gzip:
             raw_data = gzip.decompress(file_data)
-        
+
         if len(raw_data) < 16:
              raise ValueError("Decompressed SPZ data too short for header")
-             
+
         header_bytes = raw_data[:16]
         body_data = raw_data[16:]
-        
+
         magic, version, num_points, sh_degree, fractional_bits, flags, reserved = struct.unpack('<IIIBBBB', header_bytes)
-        
+
         if magic != self.MAGIC:
              raise ValueError(f"Invalid SPZ magic number: {hex(magic)}")
-        
+
         if version < 1 or version > 3:
              raise ValueError(f"Unsupported SPZ version: {version}")
-             
+
         debug_print(f"[DEBUG] SPZ Header: Ver={version}, N={num_points}, SH={sh_degree}, Bits={fractional_bits}")
 
         return self._read_body(body_data, version, num_points, sh_degree, fractional_bits)
 
     def write(self, data: np.ndarray, path: str, **kwargs) -> None:
         num_points = len(data)
-        sh_degree = 0
-        
-        # Naive check based on columns
-        if 'f_rest_0' in data.dtype.names:
-            if 'f_rest_44' in data.dtype.names: sh_degree = 3
-            elif 'f_rest_23' in data.dtype.names: sh_degree = 2
-            elif 'f_rest_8' in data.dtype.names: sh_degree = 1
-            
+        spz_version = int(kwargs.get('spz_version', 3))
+        sh_degree = GaussianStruct.infer_sh_degree_from_names(data.dtype.names)
+
         # Refine by checking active content (Smart SH Detection)
         if sh_degree > 0:
             last_active_idx = -1
-            # Check backwards from max possible index based on naive degree
-            max_idx = {3: 44, 2: 23, 1: 8}[sh_degree]
-            
+            max_idx = GaussianStruct.sh_coeff_count(sh_degree) - 1
+
             for i in range(max_idx, -1, -1):
                 fname = f'f_rest_{i}'
                 # Only check if exists (it should, based on naive check)
@@ -71,7 +72,8 @@ class SpzFormat(BaseFormat):
                         break
             
             # Update degree based on actual content
-            if last_active_idx >= 24: sh_degree = 3
+            if last_active_idx >= 45: sh_degree = 4
+            elif last_active_idx >= 24: sh_degree = 3
             elif last_active_idx >= 9: sh_degree = 2
             elif last_active_idx >= 0: sh_degree = 1
             else: sh_degree = 0
@@ -84,24 +86,87 @@ class SpzFormat(BaseFormat):
         fractional_bits = 12
         
         # 3. Pack Body
-        packed_body = self._pack_v3(data, num_points, sh_degree, fractional_bits)
-            
+        if spz_version >= 4:
+            if zstd is None:
+                raise ImportError("SPZ v4 writing requires the 'zstandard' package.")
+            comp_level = int(kwargs.get('compression_level', 3))
+            packed_payload = self._pack_v4(data, num_points, sh_degree, fractional_bits, comp_level)
+            status_line = f"Native SPZ (v4, no-flip, zstd lvl={comp_level}) export completed. {num_points} points."
+        else:
+            packed_body = self._pack_v3(data, num_points, sh_degree, fractional_bits)
+            packed_payload = packed_body
+            status_line = f"Native SPZ (v3, no-flip, lvl={kwargs.get('compression_level', 0)}) export completed. {num_points} points."
+
         # 4. Header
         magic = self.MAGIC
-        version = 3
         flags = 1 # FlagAntialiased
         reserved = 0
-        header = struct.pack('<IIIBBBB', magic, version, num_points, sh_degree, fractional_bits, flags, reserved)
-        
+
+        if spz_version >= 4:
+            full_payload = packed_payload
+        else:
+            version = 3
+            header = struct.pack('<IIIBBBB', magic, version, num_points, sh_degree, fractional_bits, flags, reserved)
+            full_payload = header + packed_payload
+
         # 5. Compress and Write
-        full_payload = header + packed_body
         comp_level = kwargs.get('compression_level', 0)
-        compressed = gzip.compress(full_payload, compresslevel=comp_level)
-        
+        if spz_version >= 4:
+            compressed = full_payload
+        else:
+            compressed = gzip.compress(full_payload, compresslevel=comp_level)
+
         with open(path, 'wb') as f:
             f.write(compressed)
-            
-        status_print(f"Native SPZ (v3, no-flip, lvl={comp_level}) export completed. {num_points} points.")
+        
+        status_print(status_line)
+
+    def _read_v4(self, file_data):
+        if zstd is None:
+            raise ImportError("SPZ v4 reading requires the 'zstandard' package.")
+
+        if len(file_data) < 32:
+            raise ValueError("SPZ v4 data too short for header")
+
+        header = struct.unpack('<IIIBBBBI12s', file_data[:32])
+        magic, version, num_points, sh_degree, fractional_bits, flags, num_streams, toc_byte_offset, _ = header
+
+        if magic != self.MAGIC:
+            raise ValueError(f"Invalid SPZ magic number: {hex(magic)}")
+        if version != 4:
+            raise ValueError(f"Unsupported SPZ version: {version}")
+        if toc_byte_offset < 32 or toc_byte_offset > len(file_data):
+            raise ValueError(f"Invalid SPZ TOC offset: {toc_byte_offset}")
+
+        debug_print(f"[DEBUG] SPZ v4 Header: N={num_points}, SH={sh_degree}, Streams={num_streams}, TOC={toc_byte_offset}")
+
+        toc_start = toc_byte_offset
+        toc_end = toc_start + (num_streams * 16)
+        if toc_end > len(file_data):
+            raise ValueError("SPZ v4 TOC exceeds file size")
+
+        toc = []
+        ptr = toc_start
+        for _ in range(num_streams):
+            comp_size, raw_size = struct.unpack_from('<QQ', file_data, ptr)
+            toc.append((comp_size, raw_size))
+            ptr += 16
+
+        stream_offset = toc_end
+        streams = []
+        dctx = zstd.ZstdDecompressor()
+        for comp_size, raw_size in toc:
+            comp_end = stream_offset + comp_size
+            if comp_end > len(file_data):
+                raise ValueError("SPZ v4 stream exceeds file size")
+            comp_blob = file_data[stream_offset:comp_end]
+            stream_offset = comp_end
+            if comp_size == 0:
+                streams.append(b'')
+                continue
+            streams.append(dctx.decompress(comp_blob, max_output_size=raw_size if raw_size else 0))
+
+        return self._read_v4_streams(streams, num_points, sh_degree, fractional_bits)
 
     def _pack_v3(self, data, N, sh_deg, frac_bits):
         stream = io.BytesIO()
@@ -171,6 +236,147 @@ class SpzFormat(BaseFormat):
             stream.write(q_sh.tobytes())
         
         return stream.getvalue()
+
+    def _pack_v4(self, data, N, sh_deg, frac_bits, comp_level):
+        if zstd is None:
+            raise ImportError("SPZ v4 writing requires the 'zstandard' package.")
+
+        streams = []
+
+        # 1. Positions stream
+        scale = (1 << frac_bits)
+        coords = np.round(np.column_stack((data['x'] * scale, data['y'] * scale, data['z'] * scale))).astype(np.int32)
+        pos_bytes = np.zeros((N, 9), dtype=np.uint8)
+        pos_bytes[:, 0:3] = np.column_stack((coords[:,0] & 0xFF, (coords[:,0] >> 8) & 0xFF, (coords[:,0] >> 16) & 0xFF))
+        pos_bytes[:, 3:6] = np.column_stack((coords[:,1] & 0xFF, (coords[:,1] >> 8) & 0xFF, (coords[:,1] >> 16) & 0xFF))
+        pos_bytes[:, 6:9] = np.column_stack((coords[:,2] & 0xFF, (coords[:,2] >> 8) & 0xFF, (coords[:,2] >> 16) & 0xFF))
+        streams.append(pos_bytes.tobytes())
+
+        # 2. Alpha stream
+        if 'opacity' in data.dtype.names:
+            alpha = (1.0 / (1.0 + np.exp(-np.clip(data['opacity'], -20, 20))) * 255.0).astype(np.uint8)
+        else:
+            alpha = np.full(N, 255, dtype=np.uint8)
+        streams.append(alpha.tobytes())
+
+        # 3. Colors stream
+        if 'f_dc_0' in data.dtype.names:
+            r = np.clip((data['f_dc_0'] * self.COLOR_SCALE + 0.5) * 255.0, 0, 255).astype(np.uint8)
+            g = np.clip((data['f_dc_1'] * self.COLOR_SCALE + 0.5) * 255.0, 0, 255).astype(np.uint8)
+            b = np.clip((data['f_dc_2'] * self.COLOR_SCALE + 0.5) * 255.0, 0, 255).astype(np.uint8)
+        else:
+            r = g = b = np.full(N, 128, dtype=np.uint8)
+        streams.append(np.column_stack((r, g, b)).astype(np.uint8).tobytes())
+
+        # 4. Scales stream
+        sx = np.clip((data['scale_0'] + 10.0) * 16.0, 0, 255).astype(np.uint8)
+        sy = np.clip((data['scale_1'] + 10.0) * 16.0, 0, 255).astype(np.uint8)
+        sz = np.clip((data['scale_2'] + 10.0) * 16.0, 0, 255).astype(np.uint8)
+        streams.append(np.column_stack((sx, sy, sz)).astype(np.uint8).tobytes())
+
+        # 5. Rotation stream
+        packed_rot = self._pack_rot_v3(data['rot_0'], data['rot_1'], data['rot_2'], data['rot_3'], N)
+        streams.append(packed_rot.tobytes())
+
+        # 6. SH stream (optional)
+        sh_dim = self._dim_for_degree(sh_deg)
+        if sh_dim > 0:
+            sh_r = [data[f'f_rest_{i}'] for i in range(sh_dim)]
+            sh_g = [data[f'f_rest_{i + sh_dim}'] for i in range(sh_dim)]
+            sh_b = [data[f'f_rest_{i + 2 * sh_dim}'] for i in range(sh_dim)]
+            interleaved_list = []
+            for i in range(sh_dim):
+                interleaved_list.extend([sh_r[i], sh_g[i], sh_b[i]])
+            sh_pts = np.column_stack(interleaved_list)
+
+            def quant_sh(val, bits):
+                bs = 1 << (8 - bits)
+                q = np.round(val * 128.0 + 128.0).astype(np.int32)
+                return np.clip((q + bs // 2) // bs * bs, 0, 255).astype(np.uint8)
+
+            q_sh = np.zeros_like(sh_pts, dtype=np.uint8)
+            q_sh[:, :9] = quant_sh(sh_pts[:, :9], 5)
+            if sh_dim > 3:
+                q_sh[:, 9:] = quant_sh(sh_pts[:, 9:], 4)
+            streams.append(q_sh.tobytes())
+
+        compressed_streams = []
+        cctx = zstd.ZstdCompressor(level=max(0, min(22, int(comp_level))))
+        for blob in streams:
+            compressed_streams.append(cctx.compress(blob))
+
+        toc = []
+        for comp_blob, raw_blob in zip(compressed_streams, streams):
+            toc.append(struct.pack('<QQ', len(comp_blob), len(raw_blob)))
+
+        header = self._build_v4_header(N, sh_deg, frac_bits, 1, num_streams=len(streams), toc_byte_offset=32)
+        return header + b''.join(toc) + b''.join(compressed_streams)
+
+    def _read_v4_streams(self, streams, N, sh_deg, frac_bits):
+        dtype_list, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=True, sh_degree=sh_deg)
+        out = np.zeros(N, dtype=dtype_list)
+
+        if len(streams) < 5:
+            raise ValueError("SPZ v4 file missing mandatory streams")
+
+        # Positions
+        pos_raw = np.frombuffer(streams[0], dtype=np.uint8).reshape(N, 3, 3)
+        b0, b1, b2 = pos_raw[:,:,0].astype(np.int32), pos_raw[:,:,1].astype(np.int32), pos_raw[:,:,2].astype(np.int32)
+        i32 = b0 | (b1 << 8) | (b2 << 16)
+        i32[(i32 & 0x800000) != 0] |= -16777216
+        val = i32.astype(np.float32) / (1 << frac_bits)
+        out['x'], out['y'], out['z'] = val[:,0], val[:,1], val[:,2]
+
+        # Alpha
+        out['opacity'] = self._linear_u8_to_logit(np.frombuffer(streams[1], dtype=np.uint8, count=N))
+
+        # Colors
+        col_data = np.frombuffer(streams[2], dtype=np.uint8, count=N * 3).reshape(N, 3)
+        dc_r = (col_data[:,0].astype(np.float32) / 255.0 - 0.5) / self.COLOR_SCALE
+        dc_g = (col_data[:,1].astype(np.float32) / 255.0 - 0.5) / self.COLOR_SCALE
+        dc_b = (col_data[:,2].astype(np.float32) / 255.0 - 0.5) / self.COLOR_SCALE
+        out['f_dc_0'], out['f_dc_1'], out['f_dc_2'] = dc_r, dc_g, dc_b
+        SH_C0 = 0.28209479177387814
+        out['red'] = np.clip((0.5 + SH_C0 * dc_r) * 255.0, 0, 255).astype(np.uint8)
+        out['green'] = np.clip((0.5 + SH_C0 * dc_g) * 255.0, 0, 255).astype(np.uint8)
+        out['blue'] = np.clip((0.5 + SH_C0 * dc_b) * 255.0, 0, 255).astype(np.uint8)
+
+        # Scales
+        s_data = np.frombuffer(streams[3], dtype=np.uint8, count=N * 3).reshape(N, 3)
+        out['scale_0'], out['scale_1'], out['scale_2'] = s_data[:,0] / 16.0 - 10.0, s_data[:,1] / 16.0 - 10.0, s_data[:,2] / 16.0 - 10.0
+
+        # Rotations
+        rot_packed = np.frombuffer(streams[4], dtype=np.uint32, count=N)
+        out['rot_0'], out['rot_1'], out['rot_2'], out['rot_3'] = self._unpack_rot_v3(rot_packed, N)
+
+        # SH
+        sh_dim = self._dim_for_degree(sh_deg)
+        if sh_dim > 0:
+            if len(streams) < 6:
+                raise ValueError("SPZ v4 file is missing the spherical harmonics stream")
+            sh_raw = np.frombuffer(streams[5], dtype=np.uint8, count=N * sh_dim * 3).reshape(N, sh_dim, 3)
+            sh_unq = (sh_raw.astype(np.float32) - 128.0) / 128.0
+            for j in range(sh_dim):
+                out[f'f_rest_{j}'] = sh_unq[:, j, 0]
+                out[f'f_rest_{j + sh_dim}'] = sh_unq[:, j, 1]
+                out[f'f_rest_{j + 2 * sh_dim}'] = sh_unq[:, j, 2]
+
+        return out
+
+    def _build_v4_header(self, num_points, sh_degree, fractional_bits, flags, num_streams, toc_byte_offset):
+        reserved = bytes(12)
+        return struct.pack(
+            '<IIIBBBBI12s',
+            self.MAGIC,
+            4,
+            num_points,
+            sh_degree,
+            fractional_bits,
+            flags,
+            num_streams,
+            toc_byte_offset,
+            reserved
+        )
 
     def _read_body(self, raw, version, N, sh_deg, frac_bits):
         ptr = 0
@@ -262,7 +468,7 @@ class SpzFormat(BaseFormat):
         return w, xyz[:,0], xyz[:,1], xyz[:,2]
 
     def _dim_for_degree(self, degree):
-        return {0: 0, 1: 3, 2: 8, 3: 15}.get(degree, 0)
+        return {0: 0, 1: 3, 2: 8, 3: 15, 4: 24}.get(degree, 0)
 
     def _unpack_rot_v3(self, packed, N):
         """Unpacks 'Smallest Three' quaternions with XYZW ordering. m_idx in bits 30..31."""

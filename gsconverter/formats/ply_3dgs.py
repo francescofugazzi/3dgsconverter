@@ -29,7 +29,8 @@ class Ply3DGSFormat(BaseFormat):
             
         # 2. Identify Extra Fields
         # Standard fields (potential names in file)
-        std_base_names = GaussianStruct.get_standard_order(has_rgb=True)
+        sh_degree = GaussianStruct.infer_sh_degree_from_names(source_names)
+        std_base_names = GaussianStruct.get_standard_order(has_rgb=True, sh_degree=sh_degree)
         # std_base_names includes nx, ny, nz
         
         std_source_names = {source_prefix + name for name in std_base_names} | set(std_base_names)
@@ -41,7 +42,7 @@ class Ply3DGSFormat(BaseFormat):
         
         # 3. Define Internal Dtype (normalized, no prefix)
         has_rgb = 'red' in source_names
-        internal_dtype, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=has_rgb, extra_fields=extra_fields)
+        internal_dtype, _ = GaussianStruct.define_dtype(has_scal=False, has_rgb=has_rgb, extra_fields=extra_fields, sh_degree=sh_degree)
         converted_data = np.zeros(len(vertices), dtype=internal_dtype)
         
         # 4. Map Fields
@@ -65,13 +66,15 @@ class Ply3DGSFormat(BaseFormat):
         # The canonical 3DGS PLY format does not keep explicit RGB channels.
         # CloudCompare-style RGB is an intermediate convenience, not part of the
         # standard 3DGS output schema.
-        std_order = GaussianStruct.get_standard_order(has_rgb=False)
+        source_sh_degree = GaussianStruct.infer_sh_degree_from_names(data.dtype.names)
+        output_sh_degree = max(3, source_sh_degree)
+        std_order = GaussianStruct.get_standard_order(has_rgb=False, sh_degree=output_sh_degree)
         
         # Determine if SH cropping is required (Degree < 3)
         crop_sh = kwargs.get('crop_sh', False)
         if crop_sh:
             last_idx = -1
-            for i in range(44, -1, -1):
+            for i in range(GaussianStruct.sh_coeff_count(4) - 1, -1, -1):
                 f_name = f'f_rest_{i}'
                 if f_name in data.dtype.names and np.any(data[f_name] != 0):
                     last_idx = i
@@ -97,7 +100,7 @@ class Ply3DGSFormat(BaseFormat):
         
         # 2. Extra Fields at the end (truly unknown ones)
         # Exclude standard names to avoid re-adding cropped attributes as extras
-        full_std_names = set(GaussianStruct.get_standard_order(has_rgb=False)) | {'nx', 'ny', 'nz', 'red', 'green', 'blue'}
+        full_std_names = set(GaussianStruct.get_standard_order(has_rgb=False, sh_degree=4)) | {'nx', 'ny', 'nz', 'red', 'green', 'blue'}
         for name in actual_fields:
             if name not in std_order and name not in full_std_names:
                 output_dtype_list.append((name, data.dtype[name].str))

@@ -8,6 +8,7 @@ from .formats.sog import SogFormat
 from .formats.ksplat import KSplatFormat
 from .formats.compressed_ply import CompressedPlyFormat
 from .processing.data_processor import DataProcessor
+from .structures import GaussianStruct
 from .utils.utility_functions import debug_print, status_print
 class Converter:
     def __init__(self, input_path, output_path, target_format):
@@ -116,53 +117,56 @@ class Converter:
             pbar.update(25)
             
             # Detect Source SH Degree
-            # Detect Source SH Degree (scan content for padded formats)
             import numpy as np
-            sh_cols = [f for f in self.data.dtype.names if f.startswith('f_rest_')]
-            source_sh_degree = 0
-            
-            # Default based on columns
-            if len(sh_cols) >= 45: source_sh_degree = 3
-            elif len(sh_cols) >= 24: source_sh_degree = 2
-            elif len(sh_cols) >= 9: source_sh_degree = 1
-            
-            # Refine by checking content (ignoring zero-padding from Ply3DGSFormat)
+            source_sh_degree = GaussianStruct.infer_sh_degree_from_names(self.data.dtype.names)
+
+            # Refine by checking content (ignoring zero-padding from writers)
             if source_sh_degree > 0:
                 last_active_idx = -1
-                # Check backwards
-                max_idx = {3: 44, 2: 23, 1: 8}[source_sh_degree]
-                
-                # Check blocks for efficiency? Or just loop. 45 checks is trivial.
+                max_idx = GaussianStruct.sh_coeff_count(source_sh_degree) - 1
+
                 for i in range(max_idx, -1, -1):
                     col = f'f_rest_{i}'
                     if col in self.data.dtype.names:
                         if np.any(self.data[col] != 0):
                             last_active_idx = i
                             break
-                
-                if last_active_idx >= 24: source_sh_degree = 3
-                elif last_active_idx >= 9: source_sh_degree = 2
-                elif last_active_idx >= 0: source_sh_degree = 1
-                else: source_sh_degree = 0
+
+                source_sh_degree = GaussianStruct.infer_sh_degree_from_names(
+                    [f'f_rest_{i}' for i in range(last_active_idx + 1)] if last_active_idx >= 0 else []
+                )
             
             # 3. Process
             pbar.set_description("Processing")
             processor = DataProcessor(self.data)
             
             # --- SH Capping Logic ---
-            # Format Limits
+            # Default policy:
+            # - standard exports stay at SH3
+            # - SH4 is opt-in via --preserve_sh4 for compatible formats
+            # - SPZ v4 is the only format with SH4 as a native write target
             self.format_max_sh = {
-            '3dgs': 3,
-            'cc': 3,
-            'parquet': 3,
-            'ksplat': 2, # KSplat officially max degree 2
-            'splat': 0,
-            'spz': 3, # SPZ supports up to 3? Actually v3 spec allows SH.
-            'sog': 3,
-            'compressed_ply': 3
+                '3dgs': 3,
+                'cc': 3,
+                'parquet': 3,
+                'ksplat': 2, # KSplat officially max degree 2
+                'splat': 0,
+                'spz': 3,
+                'sog': 3,
+                'compressed_ply': 3,
             }
-            
+
+            preserve_sh4 = bool(kwargs.get('preserve_sh4', False))
+            sh4_preserving_formats = {'3dgs', 'cc', 'parquet', 'sog', 'compressed_ply'}
+
             target_limit = self.format_max_sh.get(self.target_format, 3)
+            spz_version = None
+            if self.target_format == 'spz':
+                spz_version = int(kwargs.get('spz_version', 3))
+                target_limit = 4 if spz_version >= 4 else 3
+            elif preserve_sh4 and source_sh_degree >= 4 and self.target_format in sh4_preserving_formats:
+                target_limit = 4
+
             requested_sh = kwargs.get('sh_level')
             
             # Start matching source to avoid upscaling
@@ -171,7 +175,10 @@ class Converter:
             if requested_sh is not None:
                 # Check: Requested vs Format Limit
                 if requested_sh > target_limit:
-                    status_print(f"Warning: Requested SH degree {requested_sh} exceeds limit for '{self.target_format}' ({target_limit}). Capping to {target_limit}.")
+                    extra_hint = ""
+                    if requested_sh >= 4 and self.target_format in sh4_preserving_formats and not preserve_sh4:
+                        extra_hint = " Use --preserve_sh4 to allow SH4 output on this format."
+                    status_print(f"Warning: Requested SH degree {requested_sh} exceeds limit for '{self.target_format}' ({target_limit}). Capping to {target_limit}.{extra_hint}")
                 
                 # Check: Requested vs Source Data
                 if requested_sh > source_sh_degree:
@@ -186,6 +193,7 @@ class Converter:
                  status_print(f"SH Reduction: Source degree {source_sh_degree} -> Target degree {final_sh_degree}")
             
             processor.cap_sh_degree(final_sh_degree)
+            processor.trim_sh_degree(final_sh_degree)
             pbar.update(5)
 
             # Filters
@@ -241,7 +249,7 @@ class Converter:
             # Auto-RGB: Check if target format REQUIRES RGB and if it's missing
             # CC, KSplat, Splat strongly imply RGB usage.
             # Validate RGB requirements for specific formats
-            formats_needing_rgb = ['cc', 'splat', 'ksplat', 'sogs', 'sog'] 
+            formats_needing_rgb = ['cc', 'splat', 'ksplat', 'sog']
             
             has_rgb = 'red' in self.data.dtype.names
             force_rgb = kwargs.get('rgb', False)
@@ -285,6 +293,8 @@ class Converter:
                      status_print(f"Stripping {count} extra PLY elements (use --extra_elements to preserve).")
 
             target_handler = self._get_format_handler(self.target_format)
+            if spz_version is not None:
+                kwargs['spz_version'] = spz_version
             target_handler.write(self.data, self.output_path, **kwargs)
             
             pbar.update(40)

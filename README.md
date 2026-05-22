@@ -21,16 +21,17 @@ A versatile, high-performance tool for converting between various 3D Gaussian Sp
 
 ## Supported Formats & Peculiarities
 
-| Format | Extension | Max SH | Features & Parameters |
-| :--- | :--- | :--- | :--- |
-| **3DGS PLY** | `.ply` | **3** | **Standard Format**. Full float32. <br>• `--sh_level`: Caps SH degree. |
-| **Cloud Compare** | `.ply` | **3** | **Viewer Compatible**. Forces RGB generation. <br>• `--rgb`: Auto-converts SH to RGB. |
-| **Compressed PLY** | `.ply` | **3** | **High Compression**. Chunk-based quantization stored in standard PLY container. |
-| **Splat** | `.splat` | **0** | **Legacy Web**. RGB only (No SH). |
-| **KSplat** | `.ksplat` | **2** | **Streaming/Web**. Hierarchical quantization. <br>• `compression_level` 0 (F32), 1 (F16), ≥2 (Quantized) |
-| **SPZ** | `.spz` | **3** | **Fast Loading**. Gzip compressed. <br>• `compression_level`: Controls Gzip level (0-9). |
-| **SOG** | `.sog` | **3** | **Web/Mobile Optimized**. GPU texture compression. <br>• `compression_level`: Codebook size control. |
-| **Parquet** | `.parquet` | **3** | **Data Analysis**. Columnar storage. Pandas compatible. |
+| Format | Extension | Default Max SH | SH4 Opt-In | Features & Parameters |
+| :--- | :--- | :--- | :--- | :--- |
+| **3DGS PLY** | `.ply` | **3** | `--preserve_sh4` (experimental) | **Standard Format**. Full float32. <br> `--sh_level`: Caps SH degree. |
+| **Cloud Compare** | `.ply` | **3** | `--preserve_sh4` (experimental) | **Viewer Compatible**. Forces RGB generation. <br> `--rgb`: Auto-converts SH to RGB. |
+| **Compressed PLY** | `.ply` | **3** | `--preserve_sh4` (experimental) | **High Compression**. Chunk-based quantization stored in standard PLY container. |
+| **Splat** | `.splat` | **0** | - | **Legacy Web**. RGB only (No SH). |
+| **KSplat** | `.ksplat` | **2** | - | **Streaming/Web**. Hierarchical quantization. <br> `compression_level` 0 (F32), 1 (F16), =2 (Quantized) |
+| **SPZ v3** | `.spz` | **3** | - | **Fast Loading**. Default write target. Gzip-backed legacy stream format. <br> `spz_version=3`: Standard v3 output. <br> `compression_level`: Controls Gzip level. |
+| **SPZ v4** | `.spz` | **4** | `spz_version=4` | **Fast Loading**. Plaintext header + ZSTD streams. Native SH4 support. <br> `spz_version=4`: Enables this path for writing. |
+| **SOG** | `.sog` | **3** | `--preserve_sh4` (experimental) | **Web/Mobile Optimized**. GPU texture compression. <br> `compression_level`: Codebook size control. |
+| **Parquet** | `.parquet` | **3** | `--preserve_sh4` (experimental) | **Data Analysis**. Columnar storage. Pandas compatible. |
 
 ## Installation
 
@@ -104,8 +105,11 @@ Basic syntax:
 -   `--force`: Overwrite existing output file without prompting.
 -   `--rgb`: Force RGB generation from SH (for supported formats).
 -   `--extra_elements`: Preserves non-standard PLY elements (like `extrinsic`, `intrinsic`) when converting between 3DGS/CC formats.
--   `--sh_level`: Target SH degree (0-3). Tool **never** upscales; keeps source degree if lower.
--   `--compression_level`: 0-10. Controls quality/size ratio for supported formats (SOG, KSplat, SPZ).
+-   `--sh_level`: Target SH degree (0-4). Tool **never** upscales; keeps source degree if lower.
+-   `--crop_sh`: Trims SH padding and only writes the coefficients actually present in the source. Useful when you want a tighter, non-canonical output.
+-   `--preserve_sh4`: Experimental opt-in. Preserve SH4 on compatible non-SPZ-v4 formats when the source already contains SH4. Standard writes remain capped at SH3.
+-   `--spz_version`: SPZ output version. Default `3`; use `4` for the new plaintext-header format and native SH4 support.
+-   `--compression_level`: 0-10. Controls quality/size ratio for supported formats (SOG, KSplat, SPZ v3/v4).
     -   **KSplat**: Set to `2` for quantization (experimental levels >2 map to 2).
 
 #### Advanced Filters
@@ -126,7 +130,7 @@ Filters run in this specific order for efficiency:
 Built with **Taichi Lang** for high-performance GPU computing.
 -   **Parallelism**: Voxels and SOR are processed in parallel on the GPU.
 -   **Differentiable Design**: While currently used for conversion, the core is differentiable, allowing for future optimization and training applications.
--   **No Upscale Rule**: The converter strictly respects the source SH degree. If you convert a File with SH=1 to a format supporting SH=3, the output will remain SH=1 (padded with zeros if necessary, but never "hallucinated").
+-   **No Upscale Rule**: The converter never invents higher SH detail than the source contains. Standard exports remain capped at SH3 by default; use `--preserve_sh4` to keep SH4 only on compatible formats, and `spz_version=4` for native SPZ SH4 output.
 
 ## Credits
 
@@ -154,7 +158,8 @@ This project has undergone a complete refactoring to modularize the codebase and
         *   `0`: No compression (Float32 w/ SH). Max quality.
         *   `1`: Block compression (Uint16 Pos, Float16 Scale/Rot/SH). Good balance.
         *   `2+`: Aggressive Block compression (Uint16 Pos, Float16 Scale/Rot, Uint8 SH). Smallest size, lossy SH.
-    *   **SPZ**: Controls Gzip compression effort (1-9). This is **lossless** for the data itself, affecting only file size and save time.
+    *   **SPZ**: Controls compression effort. `spz_version=3` uses Gzip; `spz_version=4` uses ZSTD. This is **lossless** for the data itself, affecting only file size and save time.
+*   **SH4 Output Policy**: Standard exports stay at SH3 by default. Use `--preserve_sh4` for experimental SH4 preservation on compatible formats (`3dgs`, `cc`, `compressed_ply`, `parquet`, `sog`) when the source already contains SH4. Older viewers may not support SH4. `SPZ v4` is the separate native SH4 path.
     *   **SOG**: Controls SH Palette Quality (0=Max Quality, 9=Min Quality). Note: Texture compression is always Lossless WebP.
 
 *   **User-Friendly Sliders**: New `--density_sensitivity` (0.0-1.0) and `--sor_intensity` (1.0-10.0) abstract complex parameters away for easier use.

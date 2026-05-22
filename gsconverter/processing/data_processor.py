@@ -2,6 +2,7 @@ import numpy as np
 from collections import deque
 from multiprocessing import Pool, cpu_count
 from sklearn.neighbors import NearestNeighbors
+from ..structures import GaussianStruct
 from ..utils.utility_functions import debug_print, init_worker, status_print
 
 class DataProcessor:
@@ -276,25 +277,65 @@ class DataProcessor:
         Degree 0: Keep DC only (set all f_rest_* to 0)
         Degree 1: Keep first 9 f_rest_* coefficients
         Degree 2: Keep first 24 f_rest_* coefficients
-        Degree 3: Keep all (no change)
+        Degree 3: Keep first 45 f_rest_* coefficients
+        Degree 4: Keep first 72 f_rest_* coefficients
         """
-        if degree is None or degree >= 3:
+        if degree is None:
             return self.data
-            
+
+        degree = int(degree)
+        if degree >= 4:
+            return self.data
+
         debug_print(f"[DEBUG] Capping SH degree to {degree}")
-        
-        # Mapping degree to starting index of coefficients to remove
-        # Order 0: 0 AC (remove from index 0)
-        # Order 1: 9 AC (remove from index 9)
-        # Order 2: 24 AC (remove from index 24)
-        degree_to_start_idx = {0: 0, 1: 9, 2: 24}
-        start_idx = degree_to_start_idx.get(degree, 45)
-        
-        for i in range(start_idx, 45):
+
+        start_idx = GaussianStruct.sh_coeff_count(degree)
+        max_coeffs = GaussianStruct.sh_coeff_count(4)
+
+        for i in range(start_idx, max_coeffs):
             f_name = f'f_rest_{i}'
             if f_name in self.data.dtype.names:
                 self.data[f_name] = 0.0
                 
+        return self.data
+
+    def trim_sh_degree(self, degree):
+        """
+        Rebuilds the structured array so only coefficients up to the requested
+        SH degree are kept in the schema. This is different from cap_sh_degree,
+        which only zeroes higher coefficients.
+        """
+        if degree is None:
+            return self.data
+
+        degree = int(degree)
+        current_degree = GaussianStruct.infer_sh_degree_from_names(self.data.dtype.names)
+        if current_degree <= degree:
+            return self.data
+
+        debug_print(f"[DEBUG] Trimming SH schema to degree {degree}")
+
+        has_rgb = 'red' in self.data.dtype.names
+        full_standard_names = set(GaussianStruct.get_standard_order(has_rgb=has_rgb, sh_degree=4))
+        extra_fields = [
+            (name, self.data.dtype[name].str)
+            for name in self.data.dtype.names
+            if name not in full_standard_names
+        ]
+
+        dtype_list, _ = GaussianStruct.define_dtype(
+            has_scal=False,
+            has_rgb=has_rgb,
+            extra_fields=extra_fields,
+            sh_degree=degree
+        )
+        trimmed = np.zeros(len(self.data), dtype=np.dtype(dtype_list))
+
+        for name in trimmed.dtype.names:
+            if name in self.data.dtype.names:
+                trimmed[name] = self.data[name]
+
+        self.data = trimmed
         return self.data
 
     @staticmethod

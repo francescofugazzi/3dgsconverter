@@ -167,7 +167,7 @@ class SogFormat(BaseFormat):
                 sh_bands = meta['shN']['bands']
                 palette_size = meta['shN']['count']
                 
-                coeffs_per_band = [0, 9, 24, 45][sh_bands]
+                coeffs_per_band = [0, 9, 24, 45, 72][sh_bands]
                 coeffs_per_color = coeffs_per_band // 3
                 
                 # Image dims used in write:
@@ -464,38 +464,49 @@ class SogFormat(BaseFormat):
         # Detect active SH bands
         sh_bands = 0
         if 'f_rest_0' in data.dtype.names:
-             # Naive count first
-             count_sh = 0
-             for i in range(45):
-                 if f'f_rest_{i}' in data.dtype.names:
-                      count_sh += 1
-                      
-             if count_sh >= 45: sh_bands = 3
-             elif count_sh >= 24: sh_bands = 2
-             elif count_sh >= 9: sh_bands = 1
-             
-             # Smart Detection: Downgrade if content suggests lower degree works
-             if sh_bands > 0:
-                  last_active_idx = -1
-                  max_poss_idx = {3: 44, 2: 23, 1: 8}[sh_bands]
-                  
-                  # Check content (on sorted data data_s, though order doesn't matter for non-zero check)
-                  for i in range(max_poss_idx, -1, -1):
-                      fn = f'f_rest_{i}'
-                      if fn in data.dtype.names and np.any(data_s[fn] != 0):
-                           last_active_idx = i
-                           break
-                  
-                  if last_active_idx >= 24: sh_bands = 3
-                  elif last_active_idx >= 9: sh_bands = 2
-                  elif last_active_idx >= 0: sh_bands = 1
-                  else: sh_bands = 0
-                  
-             debug_print(f"[DEBUG] SOG Write: Effective SH Bands detected: {sh_bands}")
+            # Naive count first
+            count_sh = 0
+            for i in range(72):
+                if f'f_rest_{i}' in data.dtype.names:
+                    count_sh += 1
+
+            if count_sh >= 72:
+                sh_bands = 4
+            elif count_sh >= 45:
+                sh_bands = 3
+            elif count_sh >= 24:
+                sh_bands = 2
+            elif count_sh >= 9:
+                sh_bands = 1
+
+            # Smart Detection: Downgrade if content suggests lower degree works
+            if sh_bands > 0:
+                last_active_idx = -1
+                max_poss_idx = {4: 71, 3: 44, 2: 23, 1: 8}[sh_bands]
+
+                # Check content (on sorted data data_s, though order doesn't matter for non-zero check)
+                for i in range(max_poss_idx, -1, -1):
+                    fn = f'f_rest_{i}'
+                    if fn in data.dtype.names and np.any(data_s[fn] != 0):
+                        last_active_idx = i
+                        break
+
+                if last_active_idx >= 45:
+                    sh_bands = 4
+                elif last_active_idx >= 24:
+                    sh_bands = 3
+                elif last_active_idx >= 9:
+                    sh_bands = 2
+                elif last_active_idx >= 0:
+                    sh_bands = 1
+                else:
+                    sh_bands = 0
+
+            debug_print(f"[DEBUG] SOG Write: Effective SH Bands detected: {sh_bands}")
              
         shN_meta = None
         if sh_bands > 0:
-             coeffs_per_band = [0, 9, 24, 45][sh_bands]
+             coeffs_per_band = [0, 9, 24, 45, 72][sh_bands]
              sh_names = [f'f_rest_{i}' for i in range(coeffs_per_band)]
              
              # Extract SH data

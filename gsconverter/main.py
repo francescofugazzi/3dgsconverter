@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 from .converter import Converter
+from .structures import GaussianStruct
 from .utils import config
 from .version import __version__
 
@@ -162,6 +163,28 @@ def report_info(input_path, converter_obj=None):
         raw_fields = fields
         header_msg = "None"
         active_msg = "None"
+        format_note = None
+
+        def detect_spz_version(file_path):
+            try:
+                with open(file_path, 'rb') as f:
+                    blob = f.read()
+                if len(blob) >= 4 and blob[:4] == b'NGSP':
+                    return 4
+                if len(blob) >= 2 and blob[0] == 0x1f and blob[1] == 0x8b:
+                    import gzip
+                    raw = gzip.decompress(blob)
+                else:
+                    raw = blob
+                if len(raw) < 8:
+                    return None
+                magic = int.from_bytes(raw[:4], 'little')
+                version = int.from_bytes(raw[4:8], 'little')
+                if magic != 0x5053474e:
+                    return None
+                return version
+            except Exception:
+                return None
 
         if input_path.lower().endswith('.ply'):
             try:
@@ -175,10 +198,7 @@ def report_info(input_path, converter_obj=None):
                     if 'sh' in pd:
                         sh_props = [p.name for p in pd['sh'].properties]
                         n_sh = len(sh_props)
-                        deg = 0
-                        if n_sh >= 45: deg = 3
-                        elif n_sh >= 24: deg = 2
-                        elif n_sh >= 9: deg = 1
+                        deg = GaussianStruct.infer_sh_degree_from_names(sh_props)
                         
                         header_msg = f"Degree {deg} ({n_sh} coeffs)"
                         active_msg = f"Degree {deg}"
@@ -198,17 +218,10 @@ def report_info(input_path, converter_obj=None):
                              active_msg = "Degree 0"
                     else:
                         # Determine Max Degree in Header
-                        max_degree = 0
-                        if len(sh_cols) >= 45: max_degree = 3
-                        elif len(sh_cols) >= 24: max_degree = 2
-                        elif len(sh_cols) >= 9: max_degree = 1
+                        max_degree = GaussianStruct.infer_sh_degree_from_names(sh_cols)
                         
                         header_msg = f"Degree {max_degree} ({len(sh_cols)} coeffs)"
 
-                        is_deg3_active = False
-                        is_deg2_active = False
-                        is_deg1_active = False
-                        
                         def get_f_val(idx):
                             name = f'f_rest_{idx}'
                             if name in data.dtype.names:
@@ -217,41 +230,58 @@ def report_info(input_path, converter_obj=None):
                                 return data[f'scalar_{name}']
                             return None
 
-                        if max_degree >= 3:
-                            for i in range(24, 45):
-                                val = get_f_val(i)
-                                if val is not None and np.any(val):
-                                    is_deg3_active = True
-                                    break
-                        
-                        if max_degree >= 2:
-                            for i in range(9, 24):
-                                val = get_f_val(i)
-                                if val is not None and np.any(val):
-                                    is_deg2_active = True
-                                    break
-                                    
+                        eff_deg = 0
                         if max_degree >= 1:
                             for i in range(0, 9):
                                 val = get_f_val(i)
                                 if val is not None and np.any(val):
-                                    is_deg1_active = True
+                                    eff_deg = 1
                                     break
-
-                        eff_deg = 0
-                        if is_deg1_active: eff_deg = 1
-                        if is_deg2_active: eff_deg = 2
-                        if is_deg3_active: eff_deg = 3
+                        if max_degree >= 2:
+                            for i in range(9, 24):
+                                val = get_f_val(i)
+                                if val is not None and np.any(val):
+                                    eff_deg = 2
+                                    break
+                        if max_degree >= 3:
+                            for i in range(24, 45):
+                                val = get_f_val(i)
+                                if val is not None and np.any(val):
+                                    eff_deg = 3
+                                    break
+                        if max_degree >= 4:
+                            for i in range(45, 72):
+                                val = get_f_val(i)
+                                if val is not None and np.any(val):
+                                    eff_deg = 4
+                                    break
                         
                         active_msg = f"Degree {eff_deg}"
                         if eff_deg < max_degree:
                             active_msg += " (Cropped/Zeroed)"
 
+                        if max_degree >= 4:
+                            format_note = "Extended SH4 (non-standard output schema)"
+                        elif max_degree >= 3:
+                            format_note = "Canonical SH3"
+
             except Exception as e:
                 # Handle PLY parse errors gracefully
                 print(f"Warning: Could not parse PLY header for SH analysis: {e}")
                 pass 
-        
+        elif input_path.lower().endswith('.spz'):
+            spz_version = detect_spz_version(input_path)
+            if spz_version is not None:
+                print(f"SPZ Version: {spz_version}")
+                if spz_version >= 4:
+                    format_note = "SPZ v4 (native SH4)"
+                elif spz_version == 3:
+                    format_note = "SPZ v3 (standard)"
+                elif spz_version in (1, 2):
+                    format_note = "SPZ legacy (< v3)"
+                else:
+                    format_note = f"SPZ version {spz_version}"
+
         # Fallback/Generic SH analysis if not handled by specific PLY logic
         if header_msg == "None" and active_msg == "None":
             sh_cols_raw = [f for f in raw_fields if 'f_rest_' in f]
@@ -263,10 +293,7 @@ def report_info(input_path, converter_obj=None):
             
             if sh_cols_raw:
                 count_raw = len(sh_cols_raw)
-                max_degree_raw = 0
-                if count_raw >= 45: max_degree_raw = 3
-                elif count_raw >= 24: max_degree_raw = 2
-                elif count_raw >= 9: max_degree_raw = 1
+                max_degree_raw = GaussianStruct.infer_sh_degree_from_names(sh_cols_raw)
                 
                 if max_degree_raw > 0:
                     header_msg = f"Degree {max_degree_raw} ({count_raw} coeffs)"
@@ -278,6 +305,8 @@ def report_info(input_path, converter_obj=None):
 
         print(f"SH Headers: {header_msg}")
         print(f"SH Content: {active_msg}")
+        if format_note:
+            print(f"Format Note: {format_note}")
 
     except Exception as e:
         print(f"Error reading info for {input_path}: {e}")
@@ -308,11 +337,13 @@ def main():
     parser.add_argument("--sor_k", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--sor_sigma", type=float, help=argparse.SUPPRESS)
     
-    parser.add_argument("--crop_sh", action="store_true", help="Crop SH coefficients to only those present in the source (disables 45-coeff padding).")
+    parser.add_argument("--crop_sh", action="store_true", help="Crop SH coefficients to only those present in the source (disables canonical padding).")
     
     # Advanced Compression & SH Defaults
     # Note: sh_level is generic but KSplat specifically uses unique packing. 
-    parser.add_argument("--sh_level", type=int, help="Target SH degree (0-3). Automatically capped by source data and target format limits.")
+    parser.add_argument("--sh_level", type=int, help="Target SH degree (0-4). Automatically capped by source data and target format limits. Use --preserve_sh4 to emit SH4 on compatible formats when the source already contains SH4.")
+    parser.add_argument("--preserve_sh4", action="store_true", help="Preserve SH4 on compatible output formats when the source already contains SH4. Standard writes remain capped at SH3.")
+    parser.add_argument("--spz_version", type=int, choices=[3, 4], default=3, help="SPZ output version (3 or 4). Default: 3. Use 4 for native SH4 output.")
     parser.add_argument("--bucket_size", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--block_size", type=float, help=argparse.SUPPRESS)
     
@@ -323,7 +354,7 @@ def main():
     parser.add_argument("--keep_multicluster", action="store_true", help="If set, density filter keeps multiple dense clusters instead of just the largest one.")
     
     # Compression & Format Specifics
-    parser.add_argument("--compression_level", type=int, default=0, help="Compression level (0-9). Format specific: KSplat (0=Float32, 1=Block/f16, 2+=Block/u8-SH), SPZ (Gzip level), SOG (0-3=64k, 4-6=16k, 7-9=4k Palette).")
+    parser.add_argument("--compression_level", type=int, default=0, help="Compression level (0-9). Format specific: KSplat (0=Float32, 1=Block/f16, 2+=Block/u8-SH), SPZ v3 (Gzip level), SPZ v4 (ZSTD level), SOG (0-3=64k, 4-6=16k, 7-9=4k Palette).")
     
     # Parse arguments
     args = parser.parse_args()
@@ -349,6 +380,10 @@ def main():
              
     if args.compression_level < 0 or args.compression_level > 9:
          print(f"Error: --compression_level must be between 0 and 9. Got {args.compression_level}.")
+         return
+
+    if args.spz_version not in [3, 4]:
+         print(f"Error: --spz_version must be 3 or 4. Got {args.spz_version}.")
          return
 
     # --- INFO MODE ---
@@ -519,6 +554,8 @@ def main():
             bbox=args.bbox,
             rgb=args.rgb,
             sh_level=args.sh_level,
+            preserve_sh4=args.preserve_sh4,
+            spz_version=args.spz_version,
             bucket_size=args.bucket_size,
             block_size=args.block_size,
             crop_sh=args.crop_sh,
