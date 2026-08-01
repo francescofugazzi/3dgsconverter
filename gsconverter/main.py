@@ -91,7 +91,15 @@ def report_info(input_path, converter_obj=None):
     print(f"File: {abs_path}")
     
     try:
-        size_mb = os.path.getsize(abs_path) / (1024 * 1024)
+        if os.path.isdir(abs_path):
+            size_bytes = sum(
+                os.path.getsize(os.path.join(root, name))
+                for root, _, names in os.walk(abs_path)
+                for name in names
+            )
+        else:
+            size_bytes = os.path.getsize(abs_path)
+        size_mb = size_bytes / (1024 * 1024)
         print(f"Size: {size_mb:.2f} MB")
         
         # If converter_obj is not provided, create a dummy one to load source
@@ -125,7 +133,27 @@ def report_info(input_path, converter_obj=None):
             print(f"Rotation Packing: 2-10-10-10 bit")
             print(f"Color Packing: 8-8-8-8 bit")
             if 'sh' in ply:
-                print(f"SH Quantization: 8-bit ([-4, 4] range)")
+                 print(f"SH Quantization: 8-bit ([-4, 4] range)")
+
+        if converter_obj.source_format == 'sog':
+            try:
+                import json
+                import zipfile
+                if os.path.isdir(abs_path):
+                    meta_path = os.path.join(abs_path, 'meta.json')
+                    with open(meta_path, 'r', encoding='utf-8') as file:
+                        sog_meta = json.load(file)
+                elif zipfile.is_zipfile(abs_path):
+                    with zipfile.ZipFile(abs_path) as archive:
+                        sog_meta = json.loads(archive.read('meta.json'))
+                else:
+                    with open(abs_path, 'r', encoding='utf-8') as file:
+                        sog_meta = json.load(file)
+                version = sog_meta.get('version', 1)
+                label = 'SOGS v1 (legacy directory layout)' if version in (None, 1) else f'SOG v{version}'
+                print(f"SOG Version: {label}")
+            except (OSError, ValueError, KeyError):
+                pass
 
         # Scan for Extra Elements
         if hasattr(converter_obj, 'source_handler') and hasattr(converter_obj.source_handler, 'extra_elements'):
@@ -321,8 +349,8 @@ def main():
     parser.add_argument("--target_format", "-f", help="Target point cloud format (3dgs, cc, ksplat, splat, spz, sog, parquet, compressed_ply).")
     parser.add_argument("--info", "-I", action="store_true", help="Print file metadata and statistics without converting")
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug prints.")
-    parser.add_argument('--about', action=AboutAction, help='Show copyright and license info')
-    parser.add_argument("--force", action="store_true", help="Force overwrite of existing output file.")
+    parser.add_argument('--about', action=AboutAction, nargs=0, help='Show copyright and license info')
+    parser.add_argument("--force", action="store_true", help="Force overwrite of an existing output file or legacy SOGS directory.")
     
     # Other flags (pass-through)
     parser.add_argument("--rgb", action="store_true", help="Add RGB values to the output file based on f_dc values (useful for formats needing explicit RGB like CC, SOG, SPZ, Parquet).")
@@ -344,6 +372,7 @@ def main():
     parser.add_argument("--sh_level", type=int, help="Target SH degree (0-4). Automatically capped by source data and target format limits. Use --preserve_sh4 to emit SH4 on compatible formats when the source already contains SH4.")
     parser.add_argument("--preserve_sh4", action="store_true", help="Preserve SH4 on compatible output formats when the source already contains SH4. Standard writes remain capped at SH3.")
     parser.add_argument("--spz_version", type=int, choices=[3, 4], default=3, help="SPZ output version (3 or 4). Default: 3. Use 4 for native SH4 output.")
+    parser.add_argument("--sog_version", type=int, choices=[1, 2], default=2, help="SOG output version. Default: 2 bundled .sog; use 1 for the legacy directory layout.")
     parser.add_argument("--bucket_size", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--block_size", type=float, help=argparse.SUPPRESS)
     
@@ -386,6 +415,10 @@ def main():
          print(f"Error: --spz_version must be 3 or 4. Got {args.spz_version}.")
          return
 
+    if args.sog_version not in [1, 2]:
+         print(f"Error: --sog_version must be 1 or 2. Got {args.sog_version}.")
+         return
+
     # --- INFO MODE ---
     if args.info:
         import glob
@@ -411,29 +444,35 @@ def main():
          print(f"Error: Unknown target format '{args.target_format}'. Supported: {', '.join(valid_formats)}")
          return
 
+    is_sog_output = args.target_format.lower() == 'sog'
+
     # Auto-Output Logic
     if not args.output:
         base_name, input_ext = os.path.splitext(args.input)
+        if is_sog_output and args.sog_version == 1:
+            args.output = f"{base_name}_sog_v1.sog"
+            print(f"Auto-Output: Destination set to {args.output}")
+        else:
         
-        # Determine extension based on target format
-        ext_map = {
-            '3dgs': '.ply', 'cc': '.ply', 'compressed_ply': '.ply',
-            'sog': '.sog', 'splat': '.splat', 'ksplat': '.ksplat', 
-            'spz': '.spz', 'parquet': '.parquet'
-        }
-        target_ext = ext_map.get(args.target_format, '.' + args.target_format)
-        
-        # Automatic Suffix Logic
-        suffix = ""
-        if input_ext.lower() == target_ext.lower():
-             # Avoid self-overwrite by adding format-specific suffix
-             if args.target_format == 'cc': suffix = "_cc"
-             elif args.target_format == 'compressed_ply': suffix = "_compressed"
-             elif args.target_format == '3dgs': suffix = "_3dgs"
-             else: suffix = "_processed"
-             
-        args.output = f"{base_name}{suffix}{target_ext}"
-        print(f"Auto-Output: Destination set to {args.output}")
+            # Determine extension based on target format
+            ext_map = {
+                '3dgs': '.ply', 'cc': '.ply', 'compressed_ply': '.ply',
+                'sog': '.sog', 'splat': '.splat', 'ksplat': '.ksplat',
+                'spz': '.spz', 'parquet': '.parquet'
+            }
+            target_ext = ext_map.get(args.target_format, '.' + args.target_format)
+
+            # Automatic Suffix Logic
+            suffix = ""
+            if input_ext.lower() == target_ext.lower():
+                 # Avoid self-overwrite by adding format-specific suffix
+                 if args.target_format == 'cc': suffix = "_cc"
+                 elif args.target_format == 'compressed_ply': suffix = "_compressed"
+                 elif args.target_format == '3dgs': suffix = "_3dgs"
+                 else: suffix = "_processed"
+
+            args.output = f"{base_name}{suffix}{target_ext}"
+            print(f"Auto-Output: Destination set to {args.output}")
 
     # No-Op / Redundant Conversion Check
     # If source extension matches target extension AND no filters are applied, warn user.
@@ -510,7 +549,8 @@ def main():
         return
 
     # Auto-Extension Logic: Ensures output has correct extension (if user didn't provide it)
-    if not os.path.splitext(args.output)[1]:
+    is_sog_directory_output = is_sog_output and not args.output.lower().endswith('.sog')
+    if not is_sog_directory_output and not os.path.splitext(args.output)[1]:
         ext_map = {
             '3dgs': '.ply', 'cc': '.ply', 'compressed_ply': '.ply',
             'sog': '.sog', 'splat': '.splat', 'ksplat': '.ksplat', 
@@ -527,11 +567,13 @@ def main():
         
     # Overwrite Safety mechanism
     if os.path.exists(args.output) and not args.force:
-        print(f"Warning: Output file '{args.output}' already exists.")
+        kind = 'directory' if os.path.isdir(args.output) else 'file'
+        print(f"Warning: Output {kind} '{args.output}' already exists.")
         confirm = input("Overwrite? [y/N]: ").strip().lower()
         if confirm != 'y':
             print("Operation cancelled.")
             return
+        args.force = True
 
     try:
         # 1. Report Input Info
@@ -556,12 +598,14 @@ def main():
             sh_level=args.sh_level,
             preserve_sh4=args.preserve_sh4,
             spz_version=args.spz_version,
+            sog_version=args.sog_version,
             bucket_size=args.bucket_size,
             block_size=args.block_size,
             crop_sh=args.crop_sh,
             auto_bbox=args.auto_bbox,
             compression_level=args.compression_level,
-            maintain_extra_elements=args.extra_elements
+            maintain_extra_elements=args.extra_elements,
+            force=args.force,
         )
 
 

@@ -5,6 +5,8 @@ import zipfile
 import tempfile
 import io
 import struct
+import shutil
+from contextlib import closing
 from .base import BaseFormat
 from ..structures import GaussianStruct
 from ..utils.utility_functions import debug_print, status_print
@@ -19,20 +21,48 @@ except ImportError:
     MiniBatchKMeans = None
     debug_print("[WARNING] Pillow or scikit-learn not found. SOG format requires them.")
 
+
+class _DirectorySogAssets:
+    """Expose an unbundled SOG/SOGS directory through ZipFile's open API."""
+
+    def __init__(self, directory):
+        self.directory = os.path.abspath(directory)
+
+    def open(self, filename):
+        path = os.path.abspath(os.path.join(self.directory, filename))
+        if os.path.commonpath((self.directory, path)) != self.directory:
+            raise ValueError(f"Invalid SOG asset path: {filename}")
+        return open(path, 'rb')
+
+    def close(self):
+        pass
+
 class SogFormat(BaseFormat):
     def read(self, path: str, **kwargs) -> np.ndarray:
         debug_print(f"[DEBUG] Reading .sog file from {path}")
         if not Image:
              raise ImportError("Pillow is required to read .sog files. Please install it.")
         
-        # SOG is a ZIP-bundled format containing WebP texture maps
-        if not zipfile.is_zipfile(path):
-             raise ValueError("SOG Format: Only ZIP-bundled .sog files are supported.")
-             
-        with zipfile.ZipFile(path, 'r') as zf:
+        if os.path.isdir(path):
+            path = os.path.join(path, 'meta.json')
+
+        if zipfile.is_zipfile(path):
+            assets = zipfile.ZipFile(path, 'r')
+        elif os.path.basename(path).lower() == 'meta.json':
+            assets = _DirectorySogAssets(os.path.dirname(path))
+        else:
+            raise ValueError("SOG Format: Expected a bundled .sog file or an unbundled meta.json.")
+
+        with closing(assets) as zf:
             # Read meta.json
             with zf.open('meta.json') as f:
                 meta = json.load(f)
+
+            version = meta.get('version')
+            if version in (None, 1):
+                return self._read_v1(meta, zf)
+            if version != 2:
+                raise ValueError(f"Unsupported SOG version: {version}")
             
             count = meta['count']
             
@@ -105,7 +135,7 @@ class SogFormat(BaseFormat):
             quats_data = read_webp_to_flat(meta['quats']['files'][0])
             quats_u8 = quats_data.reshape(-1, 4)[:count]
             
-            q_rest = (quats_u8[:, :3].astype(np.float32) / 255.0 - 0.5) * 2.0
+            q_rest = (quats_u8[:, :3].astype(np.float32) / 255.0 - 0.5) * 2.0 / np.sqrt(2.0)
             
             # Recover max component index from Alpha
             # quats[...3] = 252 + maxComp
@@ -246,7 +276,299 @@ class SogFormat(BaseFormat):
             
             return out
 
+    def _read_v1(self, meta, assets):
+        """Read the legacy unbundled SOGS schema, which has no version field."""
+        if not all(key in meta for key in ('means', 'scales', 'quats', 'sh0')):
+            raise ValueError("Invalid legacy SOGS metadata.")
+
+        count = int(meta['means']['shape'][0])
+
+        def read_image(filename, channels):
+            with assets.open(filename) as file:
+                image = Image.open(file).convert('RGBA')
+                pixels = np.asarray(image, dtype=np.uint8).reshape(-1, 4)
+            if len(pixels) < count:
+                raise ValueError(f"Image {filename} is too small for {count} splats.")
+            return pixels[:count, :channels]
+
+        def decode_quantized(entry, channels):
+            files = entry['files']
+            if len(files) == 2:
+                low = read_image(files[0], channels).astype(np.uint16)
+                high = read_image(files[1], channels).astype(np.uint16)
+                values = low | (high << 8)
+                denominator = 65535.0
+            elif len(files) == 1:
+                values = read_image(files[0], channels)
+                denominator = 255.0
+            else:
+                raise ValueError("Unsupported legacy SOGS image layout.")
+
+            mins = np.asarray(entry['mins'], dtype=np.float32).reshape(-1)[:channels]
+            maxs = np.asarray(entry['maxs'], dtype=np.float32).reshape(-1)[:channels]
+            return values.astype(np.float32) / denominator * (maxs - mins) + mins
+
+        means_log = decode_quantized(meta['means'], 3)
+        means = np.sign(means_log) * (np.exp(np.abs(means_log)) - 1.0)
+        scales = decode_quantized(meta['scales'], 3)
+        sh0 = decode_quantized(meta['sh0'], 4)
+
+        quats_u8 = read_image(meta['quats']['files'][0], 4)
+        q_rest = (quats_u8[:, :3].astype(np.float32) / 255.0 - 0.5) * 2.0 / np.sqrt(2.0)
+        max_comp_idx = quats_u8[:, 3].astype(np.int16) - 252
+        if np.any((max_comp_idx < 0) | (max_comp_idx > 3)):
+            raise ValueError("Invalid legacy SOGS quaternion mode.")
+
+        q_missing = np.sqrt(np.maximum(1.0 - np.sum(q_rest**2, axis=1), 0.0))
+        rotations = np.zeros((count, 4), dtype=np.float32)
+        for component in range(4):
+            mask = max_comp_idx == component
+            if not np.any(mask):
+                continue
+            kept = q_rest[mask]
+            if component == 0:
+                rotations[mask] = np.column_stack((q_missing[mask], kept))
+            elif component == 1:
+                rotations[mask] = np.column_stack((kept[:, 0], q_missing[mask], kept[:, 1:]))
+            elif component == 2:
+                rotations[mask] = np.column_stack((kept[:, :2], q_missing[mask], kept[:, 2]))
+            else:
+                rotations[mask] = np.column_stack((kept, q_missing[mask]))
+
+        sh_data = {}
+        rest_count = 0
+        if 'shN' in meta:
+            sh_meta = meta['shN']
+            shape = sh_meta.get('shape', [])
+            if len(shape) < 2:
+                raise ValueError("Invalid legacy SOGS SH metadata.")
+            rest_count = int(np.prod(shape[1:]))
+            centroid_file, label_file = sh_meta['files']
+            with assets.open(centroid_file) as file:
+                centroid_pixels = np.asarray(Image.open(file).convert('RGB'), dtype=np.uint8)
+            palette_size = centroid_pixels.shape[0] * 64
+            palette_q = centroid_pixels.reshape(-1, 3)[:palette_size * rest_count]
+            palette_q = palette_q.reshape(palette_size, rest_count)
+            minimum = float(np.asarray(sh_meta['mins'], dtype=np.float32).reshape(-1)[0])
+            maximum = float(np.asarray(sh_meta['maxs'], dtype=np.float32).reshape(-1)[0])
+            palette = palette_q.astype(np.float32) / 255.0 * (maximum - minimum) + minimum
+
+            labels_u8 = read_image(label_file, 2).astype(np.uint16)
+            labels = labels_u8[:, 0] | (labels_u8[:, 1] << 8)
+            if np.any(labels >= palette_size):
+                raise ValueError("Invalid legacy SOGS SH palette index.")
+            values = palette[labels]
+            sh_data = {f'f_rest_{index}': values[:, index] for index in range(rest_count)}
+
+        degrees = {0: 0, 9: 1, 24: 2, 45: 3, 72: 4}
+        if rest_count not in degrees:
+            raise ValueError(f"Unsupported legacy SOGS SH coefficient count: {rest_count}")
+        dtype, _ = GaussianStruct.define_dtype(
+            has_scal=False,
+            has_rgb=False,
+            sh_degree=degrees[rest_count],
+        )
+        output = np.zeros(count, dtype=dtype)
+        output['x'], output['y'], output['z'] = means.T
+        output['scale_0'], output['scale_1'], output['scale_2'] = scales.T
+        output['rot_0'], output['rot_1'], output['rot_2'], output['rot_3'] = rotations.T
+        output['f_dc_0'], output['f_dc_1'], output['f_dc_2'], output['opacity'] = sh0.T
+        for name, values in sh_data.items():
+            output[name] = values
+        return output
+
+    def _write_v1(self, data, path, **kwargs):
+        """Write the legacy SOGS v1 directory layout.
+
+        SOGS v1 stores square WebP textures and has no version field in its
+        metadata. It is kept as an opt-in compatibility path; SOG v2 remains
+        the default bundled output.
+        """
+        bundled = path.lower().endswith('.sog')
+        if os.path.exists(path):
+            if not kwargs.get('force', False):
+                kind = 'bundle' if bundled else 'directory'
+                raise FileExistsError(f"Legacy SOGS output {kind} already exists: {path}")
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        if bundled:
+            output_dir = tempfile.mkdtemp(
+                prefix='.sogs-v1-',
+                dir=os.path.dirname(os.path.abspath(path)),
+            )
+        else:
+            output_dir = path
+            os.makedirs(output_dir)
+
+        count = len(data)
+        side = int(np.sqrt(count))
+        target_count = side * side
+        if target_count == 0:
+            raise ValueError("Legacy SOGS v1 cannot write an empty point cloud.")
+        if target_count != count:
+            # The historical SOGS layout requires square textures. Keep the
+            # most visible splats, matching its documented crop behaviour.
+            indices = np.argsort(data['opacity'])[::-1][:target_count]
+            data = data[indices]
+            status_print(
+                f"Legacy SOGS v1 requires square textures: kept {target_count} "
+                f"of {count} highest-opacity splats."
+            )
+        count = target_count
+
+        def save_webp(name, pixels):
+            if pixels.ndim == 2:
+                pixels = pixels.reshape(side, side, -1)
+            image = Image.fromarray(pixels)
+            image.save(
+                os.path.join(output_dir, name),
+                format='WEBP',
+                lossless=True,
+                quality=100,
+                method=6,
+                exact=True,
+            )
+            return name
+
+        def quantize(values, bits):
+            minimum = np.min(values, axis=0).astype(np.float32)
+            maximum = np.max(values, axis=0).astype(np.float32)
+            span = maximum - minimum
+            safe_span = np.where(span == 0, 1.0, span)
+            encoded = np.clip(
+                np.rint((values - minimum) / safe_span * ((1 << bits) - 1)),
+                0,
+                (1 << bits) - 1,
+            ).astype(np.uint16)
+            return encoded, minimum.tolist(), maximum.tolist()
+
+        means = np.column_stack((data['x'], data['y'], data['z'])).astype(np.float32)
+        means = np.sign(means) * np.log1p(np.abs(means))
+        means_q, means_min, means_max = quantize(means, 16)
+        means_files = [
+            save_webp('means_l.webp', (means_q & 0xff).astype(np.uint8)),
+            save_webp('means_u.webp', (means_q >> 8).astype(np.uint8)),
+        ]
+
+        scales = np.column_stack((data['scale_0'], data['scale_1'], data['scale_2'])).astype(np.float32)
+        scales_q, scales_min, scales_max = quantize(scales, 8)
+        scales_file = save_webp('scales.webp', scales_q.astype(np.uint8))
+
+        sh0 = np.column_stack((
+            data['f_dc_0'], data['f_dc_1'], data['f_dc_2'], data['opacity'],
+        )).astype(np.float32)
+        sh0_q, sh0_min, sh0_max = quantize(sh0, 8)
+        sh0_file = save_webp('sh0.webp', sh0_q.astype(np.uint8))
+
+        quats = np.column_stack((data['rot_0'], data['rot_1'], data['rot_2'], data['rot_3'])).astype(np.float32)
+        norms = np.linalg.norm(quats, axis=1, keepdims=True)
+        quats = quats / np.where(norms == 0, 1.0, norms)
+        max_index = np.argmax(np.abs(quats), axis=1)
+        signs = np.sign(quats[np.arange(count), max_index])
+        quats *= np.where(signs == 0, 1.0, signs)[:, None]
+        packed = np.empty((count, 4), dtype=np.uint8)
+        for component in range(4):
+            mask = max_index == component
+            kept = quats[mask][:, [index for index in range(4) if index != component]]
+            packed[mask, :3] = np.clip(
+                np.rint((kept * np.sqrt(2.0) * 0.5 + 0.5) * 255.0),
+                0,
+                255,
+            ).astype(np.uint8)
+        packed[:, 3] = 252 + max_index
+        quats_file = save_webp('quats.webp', packed)
+
+        meta = {
+            'means': {'shape': [count, 3], 'dtype': 'float32', 'mins': means_min, 'maxs': means_max, 'files': means_files},
+            'scales': {'shape': [count, 3], 'dtype': 'float32', 'mins': scales_min, 'maxs': scales_max, 'files': [scales_file]},
+            'quats': {'shape': [count, 4], 'dtype': 'uint8', 'encoding': 'quaternion_packed', 'files': [quats_file]},
+            'sh0': {'shape': [count, 4], 'dtype': 'float32', 'mins': sh0_min, 'maxs': sh0_max, 'files': [sh0_file]},
+        }
+
+        rest_names = [name for name in data.dtype.names if name.startswith('f_rest_')]
+        rest_names.sort(key=lambda name: int(name.rsplit('_', 1)[1]))
+        if rest_names:
+            rest = np.column_stack([data[name] for name in rest_names]).astype(np.float32)
+            rest_count = rest.shape[1]
+            if rest_count not in (9, 24, 45, 72):
+                raise ValueError(f"Unsupported legacy SOGS SH coefficient count: {rest_count}")
+            if count < 64:
+                raise ValueError("Legacy SOGS v1 needs at least 64 splats when SH coefficients are present.")
+
+            palette_size = max(64, int(round((count >> 2) / 64.0)) * 64)
+            palette_size = min(palette_size, 65536, count)
+            palette_size = max(64, (palette_size // 64) * 64)
+            centroids, labels = gpu_ops.kmeans(rest, palette_size, max_iter=20)
+            minimum = float(np.min(centroids))
+            maximum = float(np.max(centroids))
+            span = maximum - minimum or 1.0
+            centroids_q = np.clip(
+                np.rint((centroids - minimum) / span * 255.0), 0, 255
+            ).astype(np.uint8)
+            centroid_width = rest_count * 64 // 3
+            centroids_file = save_webp(
+                'shN_centroids.webp',
+                centroids_q.reshape(-1, centroid_width, 3),
+            )
+            labels = labels.astype(np.uint16)
+            labels_image = np.zeros((count, 3), dtype=np.uint8)
+            labels_image[:, 0] = labels & 0xff
+            labels_image[:, 1] = labels >> 8
+            labels_file = save_webp('shN_labels.webp', labels_image)
+            meta['shN'] = {
+                'shape': [count, rest_count],
+                'dtype': 'float32',
+                'mins': minimum,
+                'maxs': maximum,
+                'quantization': 8,
+                'files': [centroids_file, labels_file],
+            }
+
+        with open(os.path.join(output_dir, 'meta.json'), 'w', encoding='utf-8') as file:
+            json.dump(meta, file, indent=2)
+        if bundled:
+            with zipfile.ZipFile(path, 'w', zipfile.ZIP_STORED) as archive:
+                for name in os.listdir(output_dir):
+                    archive.write(os.path.join(output_dir, name), name)
+            shutil.rmtree(output_dir)
+            status_print(f"Legacy SOGS v1 bundle completed to {path}. {count} points.")
+        else:
+            status_print(f"Legacy SOGS v1 write completed to {path}. {count} points.")
+
+    def _write_v2_directory(self, data, path, **kwargs):
+        """Write an unbundled SOG v2 directory via the canonical ZIP writer."""
+        if os.path.exists(path):
+            if not kwargs.get('force', False):
+                raise FileExistsError(f"SOG v2 output directory already exists: {path}")
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
+        parent = os.path.dirname(os.path.abspath(path))
+        temp_path = os.path.join(parent, f'.{os.path.basename(path)}.sog')
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        try:
+            self.write(data, temp_path, **kwargs)
+            os.makedirs(path)
+            with zipfile.ZipFile(temp_path) as archive:
+                archive.extractall(path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        status_print(f"SOG v2 directory completed to {path}.")
+
     def write(self, data: np.ndarray, path: str, **kwargs):
+        sog_version = int(kwargs.get('sog_version', 2))
+        if sog_version == 1:
+            return self._write_v1(data, path, **kwargs)
+        if sog_version != 2:
+            raise ValueError(f"Unsupported SOG output version: {sog_version}")
+        if not path.lower().endswith('.sog'):
+            return self._write_v2_directory(data, path, **kwargs)
         
         N = len(data)
         if not Image: # MiniBatchKMeans is replaced by gpu_ops.kmeans
@@ -259,9 +581,10 @@ class SogFormat(BaseFormat):
         width = int(np.ceil(np.sqrt(N) / 4) * 4)
         height = int(np.ceil(N / width / 4) * 4)
         
-        # Lexsort order for spatial locality (improves chunked clustering and WebP compression)
-        # sort by z, y, x
-        indices = np.lexsort((data['z'], data['y'], data['x']))
+        # SOG v2 stores Gaussians in Morton (Z-order), matching the format
+        # specification and avoiding a reorder in compatible viewers.
+        indices = np.arange(N, dtype=np.uint32)
+        _sort_morton_order(data, indices)
         data_s = data[indices]
 
         # Prepare ZIP bundle (stored, as WebP provides its own compression)
@@ -648,3 +971,60 @@ class SogFormat(BaseFormat):
         zf.writestr('meta.json', json.dumps(meta))
         zf.close()
         status_print(f"SOG write completed to {path}. {N} points bundled.")
+
+
+def _sort_morton_order(data, indices):
+    """Sort indices using the same bounded recursive Morton order as PLY."""
+    x = data['x']
+    y = data['y']
+    z = data['z']
+
+    def encode_morton3(ix, iy, iz):
+        def part_1_by_2(n):
+            n &= 0x000003ff
+            n = (n ^ (n << 16)) & 0xff0000ff
+            n = (n ^ (n << 8)) & 0x0300f00f
+            n = (n ^ (n << 4)) & 0x030c30c3
+            n = (n ^ (n << 2)) & 0x09249249
+            return n
+
+        return (part_1_by_2(iz) << 2) | (part_1_by_2(iy) << 1) | part_1_by_2(ix)
+
+    def recursive_sort(idxs):
+        if len(idxs) <= 1:
+            return
+
+        cx = x[idxs]
+        cy = y[idxs]
+        cz = z[idxs]
+        min_x, max_x = cx.min(), cx.max()
+        min_y, max_y = cy.min(), cy.max()
+        min_z, max_z = cz.min(), cz.max()
+
+        x_len = max_x - min_x
+        y_len = max_y - min_y
+        z_len = max_z - min_z
+        if x_len == 0 and y_len == 0 and z_len == 0:
+            return
+
+        x_mul = 1024.0 / x_len if x_len > 0 else 0
+        y_mul = 1024.0 / y_len if y_len > 0 else 0
+        z_mul = 1024.0 / z_len if z_len > 0 else 0
+
+        ix = np.clip((cx - min_x) * x_mul, 0, 1023).astype(np.uint32)
+        iy = np.clip((cy - min_y) * y_mul, 0, 1023).astype(np.uint32)
+        iz = np.clip((cz - min_z) * z_mul, 0, 1023).astype(np.uint32)
+
+        codes = encode_morton3(ix, iy, iz)
+        order = np.argsort(codes, kind='stable')
+        idxs[:] = idxs[order]
+
+        sorted_codes = codes[order]
+        split_points = np.where(sorted_codes[1:] != sorted_codes[:-1])[0] + 1
+        starts = np.insert(split_points, 0, 0)
+        ends = np.append(split_points, len(idxs))
+        for start, end in zip(starts, ends):
+            if end - start > 256:
+                recursive_sort(idxs[start:end])
+
+    recursive_sort(indices)

@@ -30,7 +30,8 @@ A versatile, high-performance tool for converting between various 3D Gaussian Sp
 | **KSplat** | `.ksplat` | **2** | - | **Streaming/Web**. Hierarchical quantization. <br> `compression_level` 0 (F32), 1 (F16), =2 (Quantized) |
 | **SPZ v3** | `.spz` | **3** | - | **Fast Loading**. Default write target. Gzip-backed legacy stream format. <br> `spz_version=3`: Standard v3 output. <br> `compression_level`: Controls Gzip level. |
 | **SPZ v4** | `.spz` | **4** | `spz_version=4` | **Fast Loading**. Plaintext header + ZSTD streams. Native SH4 support. <br> `spz_version=4`: Enables this path for writing. |
-| **SOG** | `.sog` | **3** | `--preserve_sh4` (experimental) | **Web/Mobile Optimized**. GPU texture compression. <br> `compression_level`: Codebook size control. |
+| **SOG v2** | `.sog` ZIP or directory | **3** | `--preserve_sh4` (experimental) | **Web/Mobile Optimized**. Default bundled output; unpacked layout supported for authoring. <br> `compression_level`: Codebook size control. |
+| **SOGS v1 (legacy)** | `.sog` ZIP or directory | **3** | `--preserve_sh4` (experimental) | Read from a directory or ZIP bundle. Write with `--sog_version 1`; requires square textures and may retain highest-opacity splats to fit the legacy layout. |
 | **Parquet** | `.parquet` | **3** | `--preserve_sh4` (experimental) | **Data Analysis**. Columnar storage. Pandas compatible. |
 
 ## Installation
@@ -84,13 +85,23 @@ Basic syntax:
 3dgsconverter -i input.ply -o output.sog -f sog --compression_level 1
 ```
 
-**3. Cleaning a Point Cloud (Filters)**
+**3. Legacy SOGS v1 Output**
+```bash
+# Bundled ZIP
+3dgsconverter -i input.ply -o output_sogs_v1.sog -f sog --sog_version 1
+
+# Unpacked directory
+3dgsconverter -i input.ply -o output_sogs_v1_dir -f sog --sog_version 1
+```
+Both SOG versions write a ZIP bundle when the output ends in `.sog`; use a path without that extension to write an unpacked directory containing `meta.json` and WebP assets. SOG v1 is a legacy compatibility path, while SOG v2 remains the default. The historical v1 layout uses square textures, so a non-square point count is reduced to the highest-opacity splats.
+
+**4. Cleaning a Point Cloud (Filters)**
 ```bash
 # Remove invisible points and outliers
 3dgsconverter -i raw.ply -o clean.ply -f 3dgs --min_opacity 5 --sor_intensity 8
 ```
 
-**4. Extracting a Region of Interest**
+**5. Extracting a Region of Interest**
 ```bash
 # Crop BEFORE filtering (Attributes: minX minY minZ maxX maxY maxZ)
 3dgsconverter -i scene.spz -o crop.ply -f 3dgs --bbox -2 -2 -2 2 2 2
@@ -102,13 +113,14 @@ Basic syntax:
 -   `-i, --input`: Path to source file.
 -   `-o, --output`: Path to destination file (Optional).
 -   `-f, --format`: Target format (`3dgs`, `cc`, `ksplat`, `splat`, `sog`, `spz`, `parquet`, `compressed_ply`).
--   `--force`: Overwrite existing output file without prompting.
+-   `--force`: Overwrite an existing output file or legacy SOGS directory without prompting.
 -   `--rgb`: Force RGB generation from SH (for supported formats).
 -   `--extra_elements`: Preserves non-standard PLY elements (like `extrinsic`, `intrinsic`) when converting between 3DGS/CC formats.
 -   `--sh_level`: Target SH degree (0-4). Tool **never** upscales; keeps source degree if lower.
 -   `--crop_sh`: Trims SH padding and only writes the coefficients actually present in the source. Useful when you want a tighter, non-canonical output.
 -   `--preserve_sh4`: Experimental opt-in. Preserve SH4 on compatible non-SPZ-v4 formats when the source already contains SH4. Standard writes remain capped at SH3.
 -   `--spz_version`: SPZ output version. Default `3`; use `4` for the new plaintext-header format and native SH4 support.
+-   `--sog_version`: SOG output version. Default `2`; use `1` for legacy SOGS v1. For either version, a `.sog` output is bundled and a path without `.sog` is an unpacked directory.
 -   `--compression_level`: 0-10. Controls quality/size ratio for supported formats (SOG, KSplat, SPZ v3/v4).
     -   **KSplat**: Set to `2` for quantization (experimental levels >2 map to 2).
 
@@ -161,6 +173,7 @@ This project has undergone a complete refactoring to modularize the codebase and
     *   **SPZ**: Controls compression effort. `spz_version=3` uses Gzip; `spz_version=4` uses ZSTD. This is **lossless** for the data itself, affecting only file size and save time.
 *   **SH4 Output Policy**: Standard exports stay at SH3 by default. Use `--preserve_sh4` for experimental SH4 preservation on compatible formats (`3dgs`, `cc`, `compressed_ply`, `parquet`, `sog`) when the source already contains SH4. Older viewers may not support SH4. `SPZ v4` is the separate native SH4 path.
     *   **SOG**: Controls SH Palette Quality (0=Max Quality, 9=Min Quality). Note: Texture compression is always Lossless WebP.
+    *   **SOG Versions**: SOG v2 is the default and supports both directories and ZIP bundles. Legacy SOGS v1 is also read from either layout and is written with `--sog_version 1`. Legacy viewers may not support SH extensions.
 
 *   **User-Friendly Sliders**: New `--density_sensitivity` (0.0-1.0) and `--sor_intensity` (1.0-10.0) abstract complex parameters away for easier use.
 *   **Modular Architecture**: The monolith code has been split into `formats/`, `processing/`, and `utils/` for better maintainability and extensibility. 

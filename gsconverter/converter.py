@@ -1,4 +1,5 @@
 import os
+import json
 from .formats.ply_3dgs import Ply3DGSFormat
 from .formats.ply_cc import PlyCCFormat
 from .formats.parquet import ParquetFormat
@@ -28,6 +29,16 @@ class Converter:
     def _detect_format(self, path):
         if path.lower().endswith('.parquet'):
             return 'parquet'
+        if os.path.isdir(path):
+            path = os.path.join(path, 'meta.json')
+        if os.path.basename(path).lower() == 'meta.json':
+            try:
+                with open(path, 'r', encoding='utf-8') as file:
+                    meta = json.load(file)
+                if {'means', 'scales', 'quats', 'sh0'}.issubset(meta):
+                    return 'sog'
+            except (OSError, ValueError):
+                pass
         # Check for other extensions
         if path.lower().endswith('.splat'):
             return 'splat'
